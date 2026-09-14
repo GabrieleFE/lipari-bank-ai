@@ -15,6 +15,10 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic[email]>=2.9.0",
     "pydantic-settings>=2.2.0",
+    "sqlalchemy[asyncio]>=2.0.52",
+    "asyncpg>=0.31.0",
+    "alembic>=1.20.0",
+    "pgvector>=0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +33,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "B", "ANN", "ASYNC", "UP"]

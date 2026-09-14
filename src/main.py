@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
@@ -6,13 +8,22 @@ from fastapi.responses import JSONResponse
 
 from src.api import categorize, chat
 from src.config import settings
+from src.db.session import engine
 from src.exceptions import AppError
 from src.middleware import setup_middleware
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    await engine.dispose()
+
 
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
     description="Bootcamp Python AI Powered v1",
+    lifespan=lifespan,
 )
 
 setup_middleware(app)
