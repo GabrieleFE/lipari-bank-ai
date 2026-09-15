@@ -31,16 +31,18 @@ setup_middleware(app)
 
 @app.exception_handler(AppError)
 async def app_exception_handler(req: Request, exc: AppError) -> JSONResponse:
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "timestamp": datetime.now(UTC).isoformat(),
-            "status": exc.status_code,
-            "error": exc.code,
-            "message": exc.message,
-            "path": req.url.path,
-        },
-    )
+    content: dict[str, object] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "status": exc.status_code,
+        "error": exc.code,
+        "message": exc.message,
+        "path": req.url.path,
+    }
+    headers: dict[str, str] = {}
+    if exc.retry_after is not None:
+        content["retry_after"] = exc.retry_after
+        headers["Retry-After"] = str(exc.retry_after)
+    return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
 
 @app.exception_handler(Exception)

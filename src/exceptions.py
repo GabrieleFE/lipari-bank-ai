@@ -1,8 +1,16 @@
 class AppError(Exception):
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        *,
+        retry_after: int | None = None,
+    ) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.retry_after = retry_after
         super().__init__(message)
 
 
@@ -13,8 +21,12 @@ class ChatSessionNotFoundError(AppError):
 
 class RateLimitError(AppError):
     def __init__(self, retry_after_seconds: int) -> None:
-        super().__init__(429, "RATE_LIMIT", f"Limite raggiunto. Riprova in {retry_after_seconds}s")
-        self.retry_after = retry_after_seconds
+        super().__init__(
+            429,
+            "RATE_LIMIT",
+            f"Limite raggiunto. Riprova in {retry_after_seconds}s",
+            retry_after=retry_after_seconds,
+        )
 
 
 class LLMProviderError(AppError):

@@ -17,8 +17,12 @@ class Settings(BaseSettings):
     openai_api_key: str
     anthropic_api_key: str
     default_model: str = "gpt-4o-mini"
+    categorize_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
     max_tokens_per_request: int = 2000
+    llm_timeout_seconds: float = 60.0
+    max_daily_cost_eur: float = 5.0
+    history_max_messages: int = 20
     jwt_secret: str
 
 
