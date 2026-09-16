@@ -1,9 +1,12 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from src.config import settings
 
 
 class Base(DeclarativeBase):
@@ -12,6 +15,10 @@ class Base(DeclarativeBase):
 
 def _uuid_pk() -> Mapped[UUID]:
     return mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+
+
+def gen_uuid() -> str:
+    return str(uuid4())
 
 
 class ChatSession(Base):
@@ -50,4 +57,12 @@ class ChatMessage(Base):
     session: Mapped[ChatSession] = relationship(back_populates="messages")
 
 
-# DocumentChunk (embedding Vector(1536)) arriva al Giorno 5 con pgvector + retrieval.
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    document_id: Mapped[str] = mapped_column(String, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dim))
+    chunk_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)

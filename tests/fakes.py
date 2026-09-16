@@ -1,7 +1,9 @@
 """Fakes per i test: risposte deterministiche senza chiamare API esterne."""
 
+import hashlib
 from collections.abc import AsyncIterator
 
+from src.config import settings
 from src.llm.client import Message, StreamChunk
 from src.types.categorize import CategorizeRequest, CategorizeResponse
 
@@ -42,6 +44,32 @@ class FakeLLMProvider:
         for i in range(0, len(full), 5):
             yield StreamChunk(text=full[i : i + 5])
         yield StreamChunk(text="", tokens_used=10, cost_eur=0.0001, model=self.model)
+
+
+class FakeEmbeddingClient:
+    """Embedding deterministico della giusta dimensione, senza rete.
+
+    Stesso testo -> stesso vettore (hash SHA-256). Le similarita' risultanti
+    non sono semantiche: servono a testare la pipeline (inserimento, query
+    SQL su pgvector, ordine), non la qualita' del retrieval.
+    """
+
+    def __init__(self, dim: int | None = None) -> None:
+        self.dim = dim or settings.embedding_dim
+        self.calls: list[list[str]] = []
+
+    def _vector(self, text: str) -> list[float]:
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
+        vector = [(float(b) / 127.5) - 1.0 for b in digest]
+        vector = vector * ((self.dim // len(vector)) + 1)
+        return vector[: self.dim]
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(texts)
+        return [self._vector(t) for t in texts]
+
+    async def embed_one(self, text: str) -> list[float]:
+        return self._vector(text)
 
 
 class FakeCategorizeService:

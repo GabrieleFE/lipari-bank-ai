@@ -1,8 +1,13 @@
-from src.types.advice import AdviceRequest, AdviceResponse, Citation
+from src.types.advice import (
+    AdviceRequest,
+    AdviceResponse,
+    Citation,
+    IngestRequest,
+    IngestResponse,
+)
 from src.types.categorize import CategorizeRequest, CategorizeResponse, CategoryEnum
 from src.types.chat import ChatRequest, ChatResponse, ToolCallInfo
 from src.types.error import ErrorResponse
-from src.types.ingest import DocumentIngestRequest
 
 __all__ = [
     "AdviceRequest",
@@ -13,7 +18,8 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "Citation",
-    "DocumentIngestRequest",
     "ErrorResponse",
+    "IngestRequest",
+    "IngestResponse",
     "ToolCallInfo",
 ]

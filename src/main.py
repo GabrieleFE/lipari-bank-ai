@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from src.api import categorize, chat
+from src.api import advice, categorize, chat
 from src.config import settings
 from src.db.session import engine
 from src.exceptions import AppError
@@ -82,3 +82,4 @@ async def health() -> dict[str, str]:
 
 app.include_router(chat.router)
 app.include_router(categorize.router)
+app.include_router(advice.router)

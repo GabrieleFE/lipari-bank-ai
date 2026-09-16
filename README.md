@@ -47,6 +47,8 @@ Server runs at http://127.0.0.1:8000
 - `/api/ai/chat` — multi-turn chat persistente su PostgreSQL (`"new"` crea una sessione, un UUID la prosegue; LLM reale con provider injection)
 - `/api/ai/chat/stream` — streaming SSE chunk-by-chunk della risposta (stessa persistenza)
 - `/api/ai/categorize` — categorizzazione transazioni via LLM + Instructor (structured output Pydantic)
+- `/api/ai/advice` — RAG: domanda → top-k retrieval (pgvector cosine) → generazione con citation
+- `/api/ai/documents/ingest` — ingestione documenti → chunking → embedding →存入 pgvector
 - `/docs` — Swagger UI
 
 ## Design decisions
@@ -96,6 +98,17 @@ implementazione sono stati individuati e corretti questi difetti:
 4. **429 senza `retry_after`** — `RateLimitError` portava l'attributo ma il global handler non lo esponeva: il client non sapeva quando riprovare. Corretto propagando `retry_after` nel body e nell'header `Retry-After` (vedi `src/main.py`).
 5. **Temperature ignorata / non controllata** — nessuna scelta esplicita per compito. Corretto: categorizzazione ~temperatura bassa (structured output via Instructor), chat a 0.3 nei provider; `temperature` vive dentro il provider, non nella firma `complete` (evita di far trapelare dettagli fornitore nel contratto).
 
+### Pipeline RAG — difetti del codice lezione corretti
+
+La pipeline RAG del Giorno 5 è stata implementata da zero, seguendo la lezione come riferimento ma correggendo in anticipo i difetti più insidiosi:
+
+1. **Ingerimento senza delete preliminare** — inserire due volte lo stesso documento crea duplicati nei top-k (riduzione contesto utile); corretto con `DELETE ... WHERE document_id = ?` nella stessa transazione prima dell'insert.
+2. **Nessuna soglia di `min_similarity`** — il top-k restituisce sempre 5 chunk anche su domande fuori dominio; corretto con filtro `WHERE similarity >= threshold` applicato nella query SQL, con default misurabile.
+3. **Servizi costruiti dentro l'endpoint** — `EmbeddingClient()` e i service istanziati inline nel corpo della rotta rendevano impossibile il mock nei test; corretto con `Depends` e dependency override.
+4. **System prompt inline** — il prompt dell'advisor era scritto direttamente nel codice Python; corretto con file versionato (`src/prompts/advice_system_v1.md`) caricato dallo stesso loader del resto del progetto.
+5. **`Strict=True` mancante nello zip** — se la lista dei chunks e quella degli embedding avessero lunghezze diverse, Python avrebbe incollato sbagliati in silenzio; corretto con `zip(..., strict=True)`, che alza errore esplicito.
+6. **Migration senza `CREATE EXTENSION` manuale** — `--autogenerate` non propone `CREATE EXTENSION vector`; corretto scrivendo la migration a mano con `op.execute(...)` prima della `create_table`, e indice HNSW dedicato su `vector_cosine_ops`.
+
 ## Integrazione LLM (Giorno 4)
 
 - `src/llm/types.py` — dati del dominio LLM: `Message` (ruoli Literal, incl. `"tool"`, come da procedura), `LLMResponse` (testo + token + costo + modello), `StreamChunk` (ultimo chunk con contabilità). Re-esportati da `client.py`, che resta l'unico modulo che il codice applicativo importa.
@@ -108,6 +121,24 @@ implementazione sono stati individuati e corretti questi difetti:
 - `src/observability/cost_tracker.py` — `CostTracker`: somma di `chat_messages.cost_eur` della giornata; sopra soglia → `RateLimitError` (→ 429 con `Retry-After`). `date | None = None` nella firma evita il default valutato all'import (B008).
 - Streaming: `/api/ai/chat/stream` usa SSE con `data: {"delta": "..."}` per evitare rotture da a-capo, termina con `data: [DONE]`. La contabilità streaming arriva nell'ultimo chunk (`include_usage` su OpenAI, `get_final_message().usage` su Anthropic).
 - Cost tracking: ogni `ChatMessage` assistant salva `tokens`, `cost_eur`, `model_used`. Vedi `docs/llm-cost-experiment.md` per i numeri misurati e le query SQL.
+
+### Pipeline RAG completa (Giorno 5)
+
+**Chunking e dimensione**: `chunk_size=500`/`overlap=50` con split a fine frase per la prosa regolamentare. La banda 400-800 caratteri (default Lipari) è dove un paragrafo di regolamento sta tipicamente intero senza diluire il vettore su troppi argomenti. L'overlap al 10% copre frasi a cavallo fra due chunk, un costo accettabile (~10% di duplicazione) che evita informazioni perse nei bordi. Per i tarifari non si chunka la tabella: a monte dell'ingestione la tabella è convertita in prosa, con intestazione ripetuta per riga (una tabella tagliata a metà è illeggibile). Per le FAQ, l'unità naturale è la coppia Q/A; una richiesta lunga ~200 caratteri sta in un singolo chunk, quindi il chunking strutturale vince su quello dimensionale e l'overlap non serve.
+
+**pgvector e scelta di architettura**: testo e vettore stanno nella stessa riga (`document_chunks`), quindi una query sola (top-k cosine con filtro `min_similarity`), un solo sistema da gestire e i filtri (domani anche permessi) sono un `WHERE` accanto all'ordinamento. L'HNSW è approssimato e va bene: il risultato finisce in un prompt, e sotto le migliaia di righe la scansione è comunque veloce.
+
+**Delete-before-insert (re-ingest)**: l'IngestService cancella i chunk esistenti per `document_id` nella stessa transazione PRIMA di inserire. Senza questo passaggio, ingerire due volte lo stesso documento produce duplicati che occupano i primi posti del retrieval, riducendo il contesto utile nei top-5.
+
+**Embedding model (locale, no API key)**: non essendo disponibile una `OPENAI_API_KEY` valida, gli embedding usano un modello locale con `sentence-transformers`: `paraphrase-multilingual-MiniLM-L12-v2` (384 dim). Scelto multilingue perché i documenti del dominio sono in Italiano (l'alternativa `all-MiniLM-L6-v2` è addestrata quasi solo sull'inglese). Il client carica il modello lazy, lo esegue in `asyncio.to_thread` e normalizza i vettori; `EMBEDDING_MODEL`/`EMBEDDING_DIM` vivono in `.env` e il modello va SOLO cambiato insieme a una migration (vedi lezione Giorno 5): `document_chunks.embedding` è `vector(384)`.
+
+**Min-similarity threshold**: RAGService applica una soglia di 0.45 prima di passare i chunk al modello. Domande fuori dominio restituiscono (basso) similarity → soglia filtrata → refusal. Il valore è stato ricalibrato sulla distribuzione misurata col modello locale: in dominio 0.50-0.72, fuori dominio ≤0.41 (con OpenAI `text-embedding-3-small` i valori sono più alti e la soglia 0.6 originale era pensata per quello). Vedi `docs/rag-recall-experiment.md`.
+
+**Prompt versionato**: il system prompt dell'advisor è in `src/prompts/advice_system_v1.md` (non inline), caricato dallo stesso loader dei prompt della chat. Consente review, diff, confronto e versionamento indipendente dal codice.
+
+**Dipendenze via Inject**: EmbeddingClient, RetrievalService, IngestService e RAGService sono costruiti con `Depends` nell'endpoint, non dentro la rotta. Sostituibili dai test (e domani da un container DI), senza modificare la logica applicativa.
+
+**Caveat sulle citations**: le citations restituite dal RAG sono i chunk recuperati (fonti consultate), non quelli che il modello ha effettivamente usato. Un LLM può ignorare 4 dei 5 chunk e la risposta uscirà comunque con 5 citazioni. Le citazioni credibili si estraggono dai marcatori `[doc_id: ...]` che il modello ha scritto, incrociandoli con i chunk recuperati — nelle versioni successive del sistema.
 
 ## Development
 
@@ -136,7 +167,8 @@ uv run alembic downgrade -1
 src/
 ├── api/
 │   ├── chat.py        # POST /api/ai/chat, POST /api/ai/chat/stream (SSE)
-│   └── categorize.py  # POST /api/ai/categorize (Instructor)
+│   ├── categorize.py  # POST /api/ai/categorize (Instructor)
+│   └── advice.py      # POST /api/ai/advice (RAG), POST /api/ai/documents/ingest
 ├── llm/
 │   ├── client.py          # Protocol LLMProvider (+ re-export tipi da types.py)
 │   ├── types.py           # Message, LLMResponse, StreamChunk
@@ -144,44 +176,62 @@ src/
 │   ├── anthropic_provider.py # AnthropicProvider (system separato, stream con usage)
 │   ├── retry.py           # tenacity: backoff esponenziale sugli errori transitori
 │   ├── prompts.py         # caricamento dei prompt versionati da src/prompts/
+│   ├── embedding_client.py # EmbeddingClient: embed via sentence-transformers locale (384 dim)
 │   └── factory.py         # get_llm_provider (singleton, Depends)
+├── lib/
+│   └── chunking.py    # chunk_text: recursive fixed-size con overlap e split a fine frase
 ├── prompts/
-│   ├── chat_system_v1.md      # system prompt chat (versionato)
-│   └── categorize_system_v1.md # system prompt categorizzazione (versionato)
+│   ├── chat_system_v1.md       # system prompt chat (versionato)
+│   ├── categorize_system_v1.md  # system prompt categorizzazione (versionato)
+│   └── advice_system_v1.md      # system prompt advisor RAG (versionato, Giorno 5)
 ├── observability/
 │   └── cost_tracker.py    # CostTracker: budget giornaliero -> 429
 ├── db/
-│   ├── models.py      # SQLAlchemy 2.0: ChatSession, ChatMessage (tokens, cost_eur)
+│   ├── models.py      # SQLAlchemy 2.0: ChatSession, ChatMessage, DocumentChunk (pgvector)
 │   ├── repos.py       # ChatRepository (selectinload, no N+1)
 │   ├── session.py     # engine async + get_db per-request
 │   └── __init__.py
 ├── services/
 │   ├── chat_service.py      # business logic chat + history multi-turn + persistenza
-│   └── categorize_service.py # structured output via Instructor
+│   ├── categorize_service.py # structured output via Instructor
+│   ├── ingest_service.py     # IngestService: doc → chunks → embeddings → DB (pgvector)
+│   ├── retrieval_service.py  # RetrievalService: query → embed → cosine top-k search
+│   └── rag_service.py        # RAGService: retrieve + generate + citation + refusal
 ├── types/
 │   ├── chat.py        # ChatRequest, ChatResponse, ToolCallInfo
 │   ├── categorize.py  # CategorizeRequest, CategorizeResponse, CategoryEnum
-│   ├── advice.py      # AdviceRequest, AdviceResponse, Citation (anticipato)
-│   ├── ingest.py      # DocumentIngestRequest (anticipato)
+│   ├── advice.py      # AdviceRequest/Response, Citation, IngestRequest/Response (G5)
 │   └── error.py       # ErrorResponse globale
-├── config.py          # Pydantic Settings (env vars, incl. max_daily_cost_eur)
+├── config.py          # Pydantic Settings (env vars, incl. embedding_model)
 ├── exceptions.py      # AppError + sottoclassi (RateLimitError con retry_after)
 ├── middleware.py      # CORS + request-id
 └── main.py            # FastAPI app + handler + router
 scripts/
-└── cost_experiment.py     # dry-run del costo: 10 conversazioni x 5 turni + report SQL
+├── cost_experiment.py      # dry-run del costo: 10 conversazioni x 5 turni + report SQL
+├── async_vs_sync.py        # async vs sync benchmark (PostgreSQL I/O)
+└── ingest_docs.py          # bulk ingest: legge data/docs/*.md e POST /api/ai/documents/ingest
 alembic/
-    env.py             # configurato per engine async
-    versions/          # migration versionate
-    script.py.mako
+├── env.py             # configurato per engine async
+├── versions/          # migration versionate
+└── script.py.mako
 docker-compose.yml     # PostgreSQL 16 + pgvector (porta 5433)
 docs/
-└── llm-cost-experiment.md  # misura del costo reale + query SQL
+├── llm-cost-experiment.md
+├── async-vs-sync-experiment.md
+└── rag-recall-experiment.md  # Recall@3 su 10 Q&A ground truth (G5)
+data/
+└── docs/
+    ├── commissioni_bonifico.md
+    ├── regolamento_conti.md
+    ├── condizioni_carta_credito.md
+    └── faq_supporto.md
 tests/
 ├── conftest.py
-├── fakes.py           # FakeLLMProvider / FakeCategorizeService (niente rete nei test)
+├── fakes.py           # FakeLLMProvider / FakeCategorizeService / FakeEmbeddingClient
 ├── test_health.py
 ├── test_chat.py       # incl. budget 429 e streaming SSE
 ├── test_categorize.py
-└── test_types.py
+├── test_types.py
+├── test_chunking.py   # chunk_text: overlap, split frase, ordine, isolamento
+└── test_advice.py     # ingest, retrieval, RAG wiring, min_similarity filtering
 ```

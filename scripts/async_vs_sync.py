@@ -21,9 +21,7 @@ DOCS = Path(__file__).resolve().parent.parent / "docs" / "async-vs-sync-experime
 POOL_SIZE = 100
 
 
-async def run_query(
-    session_factory: async_sessionmaker[AsyncSession], stmt: text
-) -> None:
+async def run_query(session_factory: async_sessionmaker[AsyncSession], stmt: text) -> None:
     async with session_factory() as session:
         await session.execute(stmt)
 

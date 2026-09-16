@@ -1,10 +1,15 @@
 from pydantic import ValidationError
 
-from src.types.advice import AdviceRequest, AdviceResponse, Citation
+from src.types.advice import (
+    AdviceRequest,
+    AdviceResponse,
+    Citation,
+    IngestRequest,
+    IngestResponse,
+)
 from src.types.categorize import CategorizeRequest, CategorizeResponse
 from src.types.chat import ChatRequest, ChatResponse, ToolCallInfo
 from src.types.error import ErrorResponse
-from src.types.ingest import DocumentIngestRequest
 
 
 def test_chat_request_requires_non_empty_message() -> None:
@@ -122,9 +127,12 @@ def test_error_response_optional_details() -> None:
     assert err.details is None
 
 
-def test_advice_request_strips_whitespace() -> None:
-    req = AdviceRequest(question="  Come investo?  ")
-    assert req.question == "Come investo?"
+def test_advice_request_short_question_rejected() -> None:
+    try:
+        AdviceRequest(question="ciao")
+        raise AssertionError("Should have raised")
+    except ValidationError:
+        pass
 
 
 def test_advice_request_blank_question_rejected() -> None:
@@ -137,31 +145,42 @@ def test_advice_request_blank_question_rejected() -> None:
 
 def test_advice_response_with_citation() -> None:
     response = AdviceResponse(
-        advice="Investi in obbligazioni",
-        citations=[Citation(doc_id="d-1", title="Guida obbligazioni", excerpt="cap. 3", page=3)],
-        tokens_used=50,
-        cost_eur=0.001,
-        model_used="dummy",
-        created_at="2024-01-01T00:00:00Z",
+        answer="Il bonifico SEPA istantaneo costa €1.00 [doc_id: commissioni_bonifico].",
+        citations=[
+            Citation(
+                document_id="commissioni_bonifico",
+                chunk_id="chunk-1",
+                excerpt="Bonifico istantaneo SEPA: costo €1.00...",
+                similarity=0.89,
+            )
+        ],
+        tokens_used=245,
+        cost_eur=0.0012,
     )
-    assert response.citations[0].doc_id == "d-1"
-    assert response.citations[0].page == 3
+    assert response.citations[0].document_id == "commissioni_bonifico"
+    assert response.citations[0].similarity == 0.89
+    assert response.answer.startswith("Il bonifico")
 
 
-def test_ingest_blank_content_rejected() -> None:
+def test_ingest_request_valid() -> None:
+    req = IngestRequest(
+        document_id="commissioni_bonifico",
+        content="Le commissioni per il bonifico SEPA sono di 1 euro.",
+        metadata={"source": "data/docs/commissioni_bonifico.md"},
+    )
+    assert req.metadata is not None
+    assert req.metadata["source"] == "data/docs/commissioni_bonifico.md"
+
+
+def test_ingest_request_too_short_content_rejected() -> None:
     try:
-        DocumentIngestRequest(document_id="d-1", title="Titolo", content="   ")
+        IngestRequest(document_id="d-1", content="abc")
         raise AssertionError("Should have raised")
     except ValidationError:
         pass
 
 
-def test_ingest_valid() -> None:
-    doc = DocumentIngestRequest(
-        document_id="d-1",
-        title="Titolo",
-        content="  Testo del documento  ",
-        tags=["fisco"],
-    )
-    assert doc.content == "Testo del documento"
-    assert doc.source is None
+def test_ingest_response_valid() -> None:
+    resp = IngestResponse(chunk_count=12, embedding_dim=1536)
+    assert resp.chunk_count == 12
+    assert resp.embedding_dim == 1536

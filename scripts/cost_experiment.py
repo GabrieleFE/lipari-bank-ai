@@ -29,9 +29,7 @@ async def run_experiment() -> None:
 
     start = datetime.now(UTC)
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             for conv in range(1, CONVERSATIONS + 1):
                 session_id = "new"
                 for turn in range(1, TURNS + 1):
