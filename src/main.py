@@ -1,10 +1,12 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.api import advice, categorize, chat
 from src.config import settings
@@ -83,3 +85,8 @@ async def health() -> dict[str, str]:
 app.include_router(chat.router)
 app.include_router(categorize.router)
 app.include_router(advice.router)
+
+# Test console statica (Giorno 6): servita dalla stessa origin, niente CORS.
+# Il mount va DOPO i router: le route API hanno priorita', il resto atterra su web/.
+WEB_DIR = Path(__file__).resolve().parents[1] / "web"
+app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

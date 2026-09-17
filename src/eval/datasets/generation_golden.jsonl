@@ -1,0 +1,6 @@
+{"input": {"question": "Quanto costa un bonifico SEPA istantaneo?"}, "expected": {"doc_id": "commissioni_bonifico"}}
+{"input": {"question": "Quanto costa la carta di credito Gold il secondo anno?"}, "expected": {"doc_id": "condizioni_carta_credito"}}
+{"input": {"question": "Come blocco la carta in caso di smarrimento?"}, "expected": {"doc_id": "faq_supporto"}}
+{"input": {"question": "Qual è l'interesse sugli scoperti di conto?"}, "expected": {"doc_id": "regolamento_conti"}}
+{"input": {"question": "Quali sono le condizioni per lo scoperto non autorizzato?"}, "expected": {"doc_id": "regolamento_conti"}}
+{"input": {"question": "Quanto costa il bonifico estero extra-SEPA?"}, "expected": {"doc_id": "commissioni_bonifico"}}

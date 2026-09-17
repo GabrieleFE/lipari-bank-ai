@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str
     default_model: str = "gpt-4o-mini"
     categorize_model: str = "gpt-4o-mini"
+    judge_model: str = "gpt-4o"  # LLM-as-judge (Giorno 6): DIVERSO e piu' capace del generatore
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dim: int = 384
     max_tokens_per_request: int = 2000

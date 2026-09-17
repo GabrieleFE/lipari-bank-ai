@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LipariBank AI — Test Console</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel2: #17233a;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; border-bottom: 1px solid var(--border);
+    background: var(--panel2); position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; margin-left: 10px; }
+  .health { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .dot.up { background: var(--green); }
+  .dot.down { background: var(--red); }
+  main {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 18px; padding: 24px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .card h2 { margin: 0 0 2px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .card .endpoint { font-size: 12px; color: var(--accent); font-family: Consolas, monospace; }
+  .card p.hint { margin: 0; font-size: 12px; color: var(--muted); }
+  .examples { display: flex; flex-wrap: wrap; gap: 6px; }
+  .examples button {
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 20px; font-size: 11px; padding: 3px 10px; cursor: pointer;
+  }
+  .examples button:hover { color: var(--text); border-color: var(--accent); }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 2px; }
+  input, textarea, select {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+    font-size: 13px; font-family: inherit;
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 70px; font-family: Consolas, monospace; font-size: 12px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  button.primary {
+    background: var(--accent); color: #082f49; border: none; border-radius: 6px;
+    padding: 9px 12px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button.primary:hover { filter: brightness(1.1); }
+  button.primary:disabled { opacity: .5; cursor: wait; }
+  .result { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 10px; font-size: 12px; }
+  .result pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; color: var(--text); }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 20px; }
+  .badge.util { background: #0ea5e9; color: #082f49; }
+  .badge.ok { background: var(--green); color: #052e16; }
+  .badge.err { background: var(--red); color: #450a0a; }
+  .meta { font-size: 11px; color: var(--muted); }
+  #chatBox { min-height: 110px; max-height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  .cite { border-left: 3px solid var(--accent); padding: 4px 8px; margin-top: 6px; background: var(--panel2); border-radius: 0 6px 6px 0; }
+  .cite .src { color: var(--amber); font-size: 11px; }
+  .spinner { display:inline-block; width:12px; height:12px; border:2px solid rgba(255,255,255,.3); border-top-color: var(--accent); border-radius:50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex; align-items:baseline;">
+    <h1>LipariBank AI</h1><span class="sub">Test Console · Giorni 1-6</span>
+  </div>
+  <div class="health">
+    <span class="dot" id="healthDot"></span>
+    <span id="healthText">verifica…</span>
+    <button class="examples" onclick="checkHealth()" style="border:1px solid var(--border); background:var(--panel2); color:var(--muted); border-radius:6px; font-size:11px; padding:3px 8px; cursor:pointer;">↻</button>
+  </div>
+</header>
+
+<main>
+  <!-- CATEGORIZE -->
+  <section class="card">
+    <h2>🏷️ Categorizza <span class="endpoint">POST /api/ai/categorize</span></h2>
+    <p class="hint">Structured output via Instructor: categoria + sottocategoria + confidenza + motivazione.</p>
+    <div class="examples">
+      <button onclick="fill('cat_desc','Bonifico Enel Energia bolletta marzo'); fill('cat_amount','85.50')">Enel</button>
+      <button onclick="fill('cat_desc','Esselunga supermercato'); fill('cat_amount','45.20')">Esselunga</button>
+      <button onclick="fill('cat_desc','Uber corsa notturna'); fill('cat_amount','18.40')">Uber</button>
+      <button onclick="fill('cat_desc','Netflix abbonamento'); fill('cat_amount','12.99')">Netflix</button>
+      <button onclick="fill('cat_desc','AD AEON SOKO GRDN'); fill('cat_amount','56.00')">Garbled</button>
+    </div>
+    <div>
+      <label>Descrizione</label>
+      <input id="cat_desc" placeholder="es. Bonifico Enel Energia bolletta marzo">
+    </div>
+    <div class="row">
+      <div><label>Importo</label><input id="cat_amount" type="number" step="0.01" min="0.01" placeholder="85.50"></div>
+      <div><label>Valuta</label>
+        <select id="cat_currency"><option>EUR</option><option>USD</option><option>GBP</option></select>
+      </div>
+    </div>
+    <button class="primary" id="cat_btn" onclick="runCategorize()">Categorizza</button>
+    <div class="result" id="cat_result" hidden></div>
+  </section>
+
+  <!-- CHAT -->
+  <section class="card">
+    <h2>💬 Chat <span class="endpoint">POST /api/ai/chat (+ stream SSE)</span></h2>
+    <p class="hint">Multi-turn persistente su PostgreSQL. Session <code>new</code> = nuova conversazione.</p>
+    <div class="row">
+      <div><label>Session ID</label><input id="chat_session" value="new"></div>
+      <div><label>Streaming</label>
+        <select id="chat_stream"><option value="0">No (JSON)</option><option value="1">Sì (SSE)</option></select>
+      </div>
+    </div>
+    <div>
+      <label>Messaggio</label>
+      <input id="chat_msg" placeholder="es. Come posso verificare le commissioni dei bonifici?" 
+             onkeydown="if(event.key==='Enter') runChat()">
+    </div>
+    <button class="primary" id="chat_btn" onclick="runChat()">Invia</button>
+    <div class="result"><pre id="chatBox">La risposta del modello apparirà qui.</pre></div>
+  </section>
+
+  <!-- ADVICE / RAG -->
+  <section class="card">
+    <h2>🎓 Consulenza RAG <span class="endpoint">POST /api/ai/advice</span></h2>
+    <p class="hint">Retrieval pgvector + generazione con grounding e citation. Richiede documenti ingeriti.</p>
+    <div class="examples">
+      <button onclick="fill('adv_q','Quanto costa un bonifico SEPA istantaneo?')">Bonifico SEPA</button>
+      <button onclick="fill('adv_q','Cosa serve per aprire un conto corrente?')">Aprire un conto</button>
+      <button onclick="fill('adv_q','Come blocco la carta in caso di smarrimento?')">Bloccare la carta</button>
+      <button onclick="fill('adv_q','Qual è l\'interesse sugli scoperti di conto?')">Scoperti</button>
+    </div>
+    <div>
+      <label>Domanda</label>
+      <input id="adv_q" placeholder="es. Quanto costa il bonifico estero extra-SEPA?"
+             onkeydown="if(event.key==='Enter') runAdvice()">
+    </div>
+    <button class="primary" id="adv_btn" onclick="runAdvice()">Chiedi</button>
+    <div class="result" id="adv_result" hidden></div>
+  </section>
+
+  <!-- INGEST -->
+  <section class="card">
+    <h2>📄 Ingest documento <span class="endpoint">POST /api/ai/documents/ingest</span></h2>
+    <p class="hint">Chunking (500/50) + embedding locale + pgvector. Re-ingest idempotente.</p>
+    <div class="examples">
+      <button onclick="fill('ing_id','commissioni_bonifico'); fill('ing_text', DOC_COMM)">Commissioni</button>
+      <button onclick="fill('ing_id','faq_supporto'); fill('ing_text', DOC_FAQ)">FAQ</button>
+      <button onclick="fill('ing_id','regolamento_conti'); fill('ing_text', DOC_REG)">Regolamento</button>
+    </div>
+    <div><label>Document ID</label><input id="ing_id" placeholder="es. commissioni_bonifico"></div>
+    <div><label>Contenuto (markdown/plain text)</label>
+      <textarea id="ing_text" placeholder="Incolla qui il contenuto del documento…" style="min-height:110px;"></textarea>
+    </div>
+    <button class="primary" id="ing_btn" onclick="runIngest()">Ingerisci</button>
+    <div class="result" id="ing_result" hidden></div>
+  </section>
+</main>
+
+<script>
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const DOC_COMM = `# Commissioni Bonifici LipariBank
+
+## Bonifico SEPA standard
+Le commissioni per bonifico SEPA verso conti di altre banche sono: Online (app o web): 1.00 EUR; Allo sportello: 5.00 EUR. Tempo di esecuzione: 1 giorno lavorativo per bonifici entro le 14:00, 2 giorni oltre.
+
+## Bonifico estero (extra-SEPA)
+Costo: 15.00 EUR + 0.20% dell'importo. Tempo: 3-5 giorni lavorativi.
+
+## Bonifico istantaneo SEPA
+Disponibile fino a 15.000 EUR: costo 1.00 EUR, tempo <30 secondi.
+
+## Limiti
+Bonifici oltre 50.000 EUR richiedono verifica antifrode. Le commissioni non includono il cambio valuta.`;
+
+  const DOC_FAQ = `# FAQ Supporto LipariBank
+
+## Ho dimenticato la password dell'app. Come faccio?
+Dalla schermata di accesso seleziona "Password dimenticata". Ricevi un codice via SMS, inseriscilo e imposta la nuova password. Il blocco dopo 5 tentativi errati si sblocca contattando il numero verde 800 123 456.
+
+## Come blocco la carta in caso di smarrimento o furto?
+Bloccala in modo temporaneo o definitivo dall'app LipariBank sezione Carte, con effetto immediato. In alternativa chiama il numero verde 800 123 456, attivo 24/7. Il blocco definitivo è gratuito, la duplicata arriva entro 5 giorni lavorativi.
+
+## Quanto costa inviare un bonifico dall'app?
+Il bonifico SEPA dall'app costa 1.00 EUR ed è gratuito per gli under 30 e per i conti con canone azzerato.`;
+
+  const DOC_REG = `# Regolamento Conti Correnti LipariBank
+
+## 1. Cosa serve per aprire un conto
+Cliente maggiorenne, documento di identità valido e codice fiscale. Per i cointestati tutti devono firmare.
+
+## 2. Canone di gestione
+6.50 EUR/mese per i conti standard, azzerato per under 30 e per saldo medio annuo oltre 15.000 EUR. Il primo anno è gratuito. Include carta di debito e home banking.
+
+## 3. Interessi e saldo
+Interessi creditori allo 0,10% annuo lordo accreditati trimestralmente. Scoperto di conto al 12,5% annuo nominale, addebitato alla regolarizzazione. Sconfinamento non autorizzato: 15 EUR per evento.
+
+## 4. Operazioni e limiti
+Due prelievi gratuiti su ATM esterni al mese, poi 0.50 EUR ad operazione. Prelievi su ATM LipariBank sempre gratuiti.
+
+## 5. Recesso e chiusura
+Recesso senza penali in qualsiasi momento; chiusura entro 30 giorni dalla richiesta.`;
+
+  const fill = (id, v) => document.getElementById(id).value = v;
+
+  function setBtn(id, busy, labelOn) {
+    const b = document.getElementById(id);
+    b.disabled = busy;
+    if (busy) { b.dataset.label = b.textContent; b.innerHTML = '<span class="spinner"></span> ' + esc(labelOn); }
+    else b.textContent = b.dataset.label;
+  }
+
+  function renderJson(elId, data, status) {
+    const el = document.getElementById(elId);
+    el.hidden = false;
+    el.innerHTML = '';
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(data, null, 2);
+    el.appendChild(pre);
+    el.style.borderColor = status >= 400 ? 'var(--red)' : 'var(--green)';
+  }
+
+  async function callApi(path, body) {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  async function checkHealth() {
+    const dot = document.getElementById('healthDot');
+    const txt = document.getElementById('healthText');
+    try {
+      const res = await fetch('/health');
+      const body = await res.json();
+      dot.className = 'dot ' + (res.ok ? 'up' : 'down');
+      txt.textContent = res.ok ? 'API online — ' + body.status : 'HTTP ' + res.status;
+    } catch {
+      dot.className = 'dot down';
+      txt.textContent = 'API non raggiungibile';
+    }
+  }
+
+  async function runCategorize() {
+    const body = {
+      description: document.getElementById('cat_desc').value.trim(),
+      amount: parseFloat(document.getElementById('cat_amount').value),
+      currency: document.getElementById('cat_currency').value,
+    };
+    if (!body.description || !body.amount) return alert('Inserisci descrizione e importo');
+    setBtn('cat_btn', true, 'Categorizzo…');
+    try {
+      const { ok, status, data } = await callApi('/api/ai/categorize', body);
+      const el = document.getElementById('cat_result');
+      el.hidden = false;
+      el.innerHTML = '';
+      if (ok) {
+        const badge = document.createElement('span');
+        badge.className = 'badge util';
+        badge.textContent = data.category;
+        el.appendChild(badge);
+        const pre = document.createElement('pre');
+        pre.textContent = JSON.stringify(data, null, 2);
+        el.appendChild(pre);
+        el.style.borderColor = 'var(--green)';
+      } else {
+        renderJson('cat_result', data, status);
+      }
+    } finally { setBtn('cat_btn', false); }
+  }
+
+  async function runChat() {
+    const sessionId = document.getElementById('chat_session').value.trim();
+    const msg = document.getElementById('chat_msg').value.trim();
+    if (!msg) return alert('Scrivi un messaggio');
+    const stream = document.getElementById('chat_stream').value === '1';
+    const box = document.getElementById('chatBox');
+    setBtn('chat_btn', true, 'Rispondo…');
+
+    if (!stream) {
+      try {
+        const { status, data } = await callApi('/api/ai/chat', { session_id: sessionId, message: msg });
+        box.textContent = '';
+        if (status >= 400) {
+          box.textContent = 'HTTP ' + status + '\n' + JSON.stringify(data, null, 2);
+          box.style.color = 'var(--red)';
+          return;
+        }
+        box.textContent = data.reply;
+        box.style.color = 'var(--text)';
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = `session ${data.session_id} · ${data.model_used} · ${data.tokens_used} tok · €${data.cost_eur.toFixed(5)}`;
+        box.appendChild(meta);
+      } finally { setBtn('chat_btn', false); }
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/ai/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, message: msg }),
+      });
+      if (!res.ok || !res.body) {
+        box.textContent = 'HTTP ' + res.status;
+        box.style.color = 'var(--red)';
+        return;
+      }
+      box.textContent = '';
+      box.style.color = 'var(--text)';
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop();
+        for (const ev of events) {
+          for (const line of ev.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6);
+            if (payload === '[DONE]') continue;
+            try {
+              const d = JSON.parse(payload);
+              box.textContent += d.delta;
+            } catch { /* ignore malformed */ }
+          }
+        }
+        box.scrollTop = box.scrollHeight;
+      }
+    } finally { setBtn('chat_btn', false); }
+  }
+
+  async function runAdvice() {
+    const q = document.getElementById('adv_q').value.trim();
+    if (!q) return alert('Scrivi una domanda');
+    setBtn('adv_btn', true, 'Consulto i documenti…');
+    try {
+      const { ok, status, data } = await callApi('/api/ai/advice', { question: q });
+      const el = document.getElementById('adv_result');
+      el.hidden = false;
+      el.innerHTML = '';
+      if (!ok) {
+        el.style.borderColor = 'var(--red)';
+        const pre = document.createElement('pre');
+        pre.textContent = JSON.stringify(data, null, 2);
+        el.appendChild(pre);
+        return;
+      }
+      el.style.borderColor = 'var(--green)';
+      const ans = document.createElement('div');
+      ans.style.whiteSpace = 'pre-wrap';
+      ans.style.marginBottom = '6px';
+      ans.textContent = data.answer;
+      el.appendChild(ans);
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `${data.model_used || '—'} · ${data.tokens_used} tok · €${data.cost_eur.toFixed(5)}`;
+      el.appendChild(meta);
+      for (const c of data.citations || []) {
+        const div = document.createElement('div');
+        div.className = 'cite';
+        const src = document.createElement('div');
+        src.className = 'src';
+        src.textContent = `[${c.document_id}] chunk ${c.chunk_id} · sim ${c.similarity.toFixed(3)}`;
+        const ex = document.createElement('div');
+        ex.style.marginTop = '2px';
+        ex.textContent = c.excerpt;
+        div.appendChild(src);
+        div.appendChild(ex);
+        el.appendChild(div);
+      }
+      if (!data.citations || !data.citations.length) {
+        const warn = document.createElement('div');
+        warn.className = 'meta';
+        warn.textContent = '⚠ Nessuna citazione: nessun chunk sopra la soglia (possible domanda fuori dominio).';
+        el.appendChild(warn);
+      }
+    } finally { setBtn('adv_btn', false); }
+  }
+
+  async function runIngest() {
+    const document_id = document.getElementById('ing_id').value.trim();
+    const content = document.getElementById('ing_text').value.trim();
+    if (!document_id || !content) return alert('Inserisci document_id e contenuto');
+    setBtn('ing_btn', true, 'Chunko + embedding…');
+    try {
+      const { ok, status, data } = await callApi('/api/ai/documents/ingest', { document_id, content });
+      renderJson('ing_result', data, status);
+    } finally { setBtn('ing_btn', false); }
+  }
+
+  checkHealth();
+</script>
+</body>
+</html>

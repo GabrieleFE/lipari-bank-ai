@@ -11,9 +11,12 @@ router = APIRouter(prefix="/api/ai", tags=["Categorize"])
 _instructor_client: Any = None  # singleton lazily created
 
 
-def get_categorize_service() -> CategorizeService:
-    """Singleton: Instructor wrappa AsyncOpenAI e forza lo structured output.
-    Nei test si sostituisce con un fake tramite `app.dependency_overrides`."""
+def get_categorize_service(model: str | None = None) -> CategorizeService:
+    """Un solo client Instructor riusato (singleton); il modello e' configurabile.
+
+    `model` esplicito serve al confronto A/B degli eval (Giorno 6): si muove
+    UN solo modello alla volta sullo stesso dataset congelato. Nei test si
+    sostituisce con un fake tramite `app.dependency_overrides`."""
     global _instructor_client
     if _instructor_client is None:
         import instructor
@@ -26,7 +29,7 @@ def get_categorize_service() -> CategorizeService:
                 max_retries=0,
             )
         )
-    return CategorizeService(_instructor_client, model=settings.categorize_model)
+    return CategorizeService(_instructor_client, model=model or settings.categorize_model)
 
 
 @router.post(

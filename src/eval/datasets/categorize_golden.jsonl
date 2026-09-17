@@ -1,0 +1,32 @@
+{"input": {"description": "Bonifico Enel Energia bolletta marzo", "amount": 85.50}, "expected": {"category": "UTILITIES"}}
+{"input": {"description": "Esselunga supermercato", "amount": 45.20}, "expected": {"category": "GROCERIES"}}
+{"input": {"description": "Distributore IP carburante", "amount": 60.00}, "expected": {"category": "TRANSPORT"}}
+{"input": {"description": "Ristorante La Vigna", "amount": 35.00}, "expected": {"category": "RESTAURANTS"}}
+{"input": {"description": "Netflix abbonamento", "amount": 12.99}, "expected": {"category": "ENTERTAINMENT"}}
+{"input": {"description": "Bonifico generico Mario Rossi", "amount": 50.00}, "expected": {"category": "OTHER"}}
+{"input": {"description": "Bolletta gas Eni", "amount": 72.30}, "expected": {"category": "UTILITIES"}}
+{"input": {"description": "Conad centro commerciale", "amount": 23.10}, "expected": {"category": "GROCERIES"}}
+{"input": {"description": "Acea energia luce", "amount": 41.75}, "expected": {"category": "UTILITIES"}}
+{"input": {"description": "Iliad telefonia rinnovo", "amount": 9.99}, "expected": {"category": "UTILITIES"}}
+{"input": {"description": "Trenitalia biglietto", "amount": 29.90}, "expected": {"category": "TRANSPORT"}}
+{"input": {"description": "Uber corsa notturna", "amount": 18.40}, "expected": {"category": "TRANSPORT"}}
+{"input": {"description": "Pizzeria Da Michele", "amount": 22.00}, "expected": {"category": "RESTAURANTS"}}
+{"input": {"description": "Spotify premium", "amount": 10.99}, "expected": {"category": "ENTERTAINMENT"}}
+{"input": {"description": "Cinema UCI multisala", "amount": 15.00}, "expected": {"category": "ENTERTAINMENT"}}
+{"input": {"description": "Amazon.it ordine 12345", "amount": 67.89}, "expected": {"category": "OTHER"}}
+{"input": {"description": "ATM prelievo contante", "amount": 200.00}, "expected": {"category": "OTHER"}}
+{"input": {"description": "Dipendenza acquisto muovi benzina", "amount": 45.00}, "expected": {"category": "TRANSPORT"}}
+{"input": {"description": "PEDAGGIO AUTOSTRADALE TELEPASS", "amount": 8.60}, "expected": {"category": "TRANSPORT"}}
+{"input": {"description": "Ristorazione scolastica mensa", "amount": 5.50}, "expected": {"category": "RESTAURANTS"}}
+{"input": {"description": "Bar pasticceria Centrale", "amount": 4.20}, "expected": {"category": "RESTAURANTS"}}
+{"input": {"description": "SISAL Lottomatica giocate", "amount": 10.00}, "expected": {"category": "OTHER"}}
+{"input": {"description": "Profumeria Douglas", "amount": 34.90}, "expected": {"category": "OTHER"}}
+{"input": {"description": "Farmacia comunale", "amount": 12.50}, "expected": {"category": "OTHER"}}
+{"input": {"description": "AD AEON SOKO GRDN", "amount": 56.00}, "expected": {"category": "OTHER"}}
+{"input": {"description": "PAYPAL *NETFLIX.COM", "amount": 12.99}, "expected": {"category": "ENTERTAINMENT"}}
+{"input": {"description": "Vodafone ricarica", "amount": 15.00}, "expected": {"category": "UTILITIES"}}
+{"input": {"description": "Assicurazione RCAuto", "amount": 320.00}, "expected": {"category": "TRANSPORT"}}
+{"input": {"description": "McDonald's corso Buenos Aires", "amount": 8.90}, "expected": {"category": "RESTAURANTS"}}
+{"input": {"description": "Casa dell'Acqua srl", "amount": 18.00}, "expected": {"category": "UTILITIES"}}
+{"input": {"description": "Ristorante sushi Kyoto", "amount": 48.00}, "expected": {"category": "RESTAURANTS"}}
+{"input": {"description": "Stipendio", "amount": 2350.00}, "expected": {"category": "OTHER"}}

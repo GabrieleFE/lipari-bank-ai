@@ -1,0 +1,25 @@
+{"query": "Quanto costa un bonifico SEPA istantaneo?", "expected_doc_id": "commissioni_bonifico"}
+{"query": "Qual è il costo del bonifico estero extra-SEPA?", "expected_doc_id": "commissioni_bonifico"}
+{"query": "Quali sono le commissioni per un bonifico SEPA allo sportello?", "expected_doc_id": "commissioni_bonifico"}
+{"query": "Quanto tempo impiega un bonifico istantaneo a essere eseguito?", "expected_doc_id": "commissioni_bonifico"}
+{"query": "Esiste un limite di importo per i bonifici istantanei?", "expected_doc_id": "commissioni_bonifico"}
+{"query": "Quanto costa inviare un bonifico dall'app?", "expected_doc_id": "faq_supporto"}
+{"query": "Il bonifico SEPA online è gratuito per i clienti under 30?", "expected_doc_id": "faq_supporto"}
+{"query": "A quanto ammonta il canone di gestione mensile del conto standard?", "expected_doc_id": "regolamento_conti"}
+{"query": "Quali sono le condizioni per lo scoperto non autorizzato sul conto?", "expected_doc_id": "regolamento_conti"}
+{"query": "Qual è il costo massimo dello scoperto concesso sul conto?", "expected_doc_id": "regolamento_conti"}
+{"query": "Quanto costa la carta di credito Gold il secondo anno?", "expected_doc_id": "condizioni_carta_credito"}
+{"query": "Qual è il periodo senza interessi della carta di credito?", "expected_doc_id": "condizioni_carta_credito"}
+{"query": "Quanto costa una carta di credito Classic?", "expected_doc_id": "condizioni_carta_credito"}
+{"query": "Quale plafond massimo ha la carta di credito Gold?", "expected_doc_id": "condizioni_carta_credito"}
+{"query": "La carta Gold include le assicurazioni viaggio?", "expected_doc_id": "condizioni_carta_credito"}
+{"query": "Qual è la commissione per un prelievo con carta di credito?", "expected_doc_id": "condizioni_carta_credito"}
+{"query": "Come recupero la password dimenticata dell'app?", "expected_doc_id": "faq_supporto"}
+{"query": "Come blocco la carta in caso di smarrimento o furto?", "expected_doc_id": "faq_supporto"}
+{"query": "Posso aprire un conto senza recarmi in filiale?", "expected_doc_id": "faq_supporto"}
+{"query": "Come attivo una carta di credito ricevuta a domicilio?", "expected_doc_id": "faq_supporto"}
+{"query": "Dove trovo l'estratto conto digitale?", "expected_doc_id": "faq_supporto"}
+{"query": "Cosa serve per aprire un conto corrente?", "expected_doc_id": "regolamento_conti"}
+{"query": "Qual è il tasso di interesse sugli scoperti di conto?", "expected_doc_id": "regolamento_conti"}
+{"query": "Quanti prelievi gratuiti ho sugli ATM esterni?", "expected_doc_id": "regolamento_conti"}
+{"query": "Come funziona la chiusura del conto?", "expected_doc_id": "regolamento_conti"}
