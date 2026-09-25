@@ -1,237 +1,208 @@
-# LipariBank AI Assistant
+# Lipari Bank AI
 
-Backend AI-powered per LipariBank. Built during Python Bootcamp AI Powered v1 — Lipari Consulting.
-
-## Tech Stack
-
-- Python 3.12+
-- FastAPI (async, type-driven)
-- Pydantic v2 (validation + serialization)
-- SQLAlchemy 2.0 (async, typed `Mapped`/`mapped_column`) + asyncpg
-- PostgreSQL 16 + pgvector (Docker)
-- Alembic (migration versionate)
-- uv (package manager)
-- mypy strict (type checking)
-- ruff (linting + formatting)
-- pytest + pytest-asyncio
-- OpenAI + Anthropic SDK (async), Instructor (structured output), tenacity (retry/backoff)
+Progetto del bootcamp **Python AI-Powered v3**: API FastAPI con RAG (pgvector), classificazione
+automatica delle transazioni e assistente finanziario, più una console web statica.
 
 ## Quickstart
 
+### Prerequisiti
+
+- Python 3.12 (fissato in `.python-version`, letto automaticamente da `uv`)
+- [uv](https://docs.astral.sh/uv/): gestisce Python, virtualenv e dipendenze
+- Docker Desktop (PostgreSQL 16 con pgvector)
+
+Non serve installare Python 3.12 a mano: `uv` lo scarica e lo usa per il virtualenv.
+
+### 1. Configurazione dell'ambiente
+
+Copia il file di configurazione:
+
+```powershell
+Copy-Item .env.example .env
+```
+
 ```bash
-# Install uv (if not installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh  # Linux/Mac
-# or
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"  # Windows
-
-# Install deps
-uv sync
-
-# Copy env vars
 cp .env.example .env
-# Edit .env with your keys
+```
 
-# Avvia PostgreSQL+pgvector (porta 5433, la 5432 è riservata ad un Postgres locale)
-docker compose up -d
+Apri `.env` e compila:
 
-# Applica le migration (tabelle chat_sessions / chat_messages)
+- `APP_NAME`, `ENVIRONMENT` (`local` in sviluppo), `DEBUG`
+- `DATABASE_URL` (stesso valore di `docker-compose.yml`)
+- `OPENAI_API_KEY` e/o `ANTHROPIC_API_KEY`: facoltative per l'avvio, obbligatorie per usare i provider
+- modelli: `DEFAULT_MODEL`, `CATEGORIZE_MODEL`, `JUDGE_MODEL`, `EMBEDDING_MODEL`
+- parametri: `EMBEDDING_DIM`, `MAX_TOKENS_PER_REQUEST`, `LLM_TIMEOUT_SECONDS`,
+  `MAX_DAILY_COST_EUR`, `HISTORY_MAX_MESSAGES`
+- `JWT_SECRET`: stringa casuale di almeno 32 caratteri
+
+Per generare il segreto JWT con qualsiasi Python 3.12:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Se `.env` manca una variabile obbligatoria o un valore ha il tipo sbagliato, l'app **non parte** e
+il messaggio dice quale campo correggere e cosa ci si aspetta (per esempio
+`MAX_TOKENS_PER_REQUEST: deve essere un numero intero`). I valori dei segreti non finiscono mai nel
+messaggio di errore.
+
+### 2. Installazione delle dipendenze
+
+```bash
+uv sync --locked
+```
+
+`--locked` installa esattamente le versioni di `uv.lock`, che è tracciato in Git: un collega che
+clona il repo ottiene lo stesso ambiente, senza sorprese.
+
+#### Scelta: dependency group `dev`
+
+I tool di sviluppo (pytest, mypy, ruff, alembic) stanno nel dependency group PEP 735 `dev`, non
+come dipendenze "extra" del pacchetto: è lo standard più recente per `uv add --dev` e mantiene
+`pyproject.toml` leggibile. `uv sync` installa già il gruppo `dev` per default, quindi l'ambiente è
+completo subito. In produzione si usa `uv sync --no-dev --locked`.
+
+### 3. Database
+
+```bash
+docker compose up -d db
 uv run alembic upgrade head
+```
 
-# Start dev server
+### 4. Avvio
+
+```bash
 uv run uvicorn src.main:app --reload
 ```
 
-Server runs at http://127.0.0.1:8000
+- Documentazione interattiva: http://localhost:8000/docs
+- Health check: http://localhost:8000/health (su Windows: `curl.exe http://localhost:8000/health`)
 
-- `/health` — health check endpoint
-- `/api/ai/chat` — multi-turn chat persistente su PostgreSQL (`"new"` crea una sessione, un UUID la prosegue; LLM reale con provider injection)
-- `/api/ai/chat/stream` — streaming SSE chunk-by-chunk della risposta (stessa persistenza)
-- `/api/ai/categorize` — categorizzazione transazioni via LLM + Instructor (structured output Pydantic)
-- `/api/ai/advice` — RAG: domanda → top-k retrieval (pgvector cosine) → generazione con citation
-- `/api/ai/documents/ingest` — ingestione documenti → chunking → embedding →存入 pgvector
-- `/docs` — Swagger UI
+Esempio di risposta quando le chiavi dei modelli non sono configurate:
 
-## Design decisions
-
-### Giorno 4 — Abstraction layer con entrambi i provider (OpenAI + Anthropic)
-
-Scelgo l'astrazione con entrambi i provider per tre ragioni: (1) per una banca la resilienza a un provider down pesa più della velocità di consegna; (2) il costo dell'interfaccia è già pagato in ~60 righe (`src/llm/client.py`), e la factory riduce un cambio fornitore a una riga in `.env`; (3) i test del Giorno 7 sfruttano la stessa injectabilità. Il motto è: la dipendenza da un fornitore non si evita scegliendone uno migliore, si evita con un'interfaccia propria in mezzo.
-
-### Sliding door A — response_model esplicito vs return type hint
-
-Sugli endpoint uso **`response_model` esplicito** insieme al return type hint. Il type hint lo legge mypy e mi protegge mentre scrivo; `response_model` lo esegue FastAPI a runtime e **valida e filtra** l'output reale (es. impedisce che un refactoring interno faccia trapelare campi nel contratto pubblico). Su endpoint pubblici servono tutti e due: sceglierne uno solo significa rinunciare a metà della protezione.
-
-### Giorno 3 — Alembic vs `create_all()`
-
-Scelgo **Alembic**: le migration diventano versionate e riproducibili su qualsiasi ambiente (dev, prod), si possono applicare/rollback con `upgrade`/`downgrade` e autogenerate cattura i cambi di schema senza toccare i dati. `create_all()` è comodo in demo ma è muto: non traccia le evoluzioni dello schema, non fa downgrade e su un DB esistente è pericoloso. Non appena le tabelle ospitano dati veri (qui i messaggi della chat), serve la migration versionata.
-
-## Error handling
-
-Gestione centralizzata degli errori in `src/exceptions.py` + handler in `src/main.py`:
-
-- `AppError` → status code custom + body `ErrorResponse` uniforme
-- `RequestValidationError` → 422 con `details` (lista di `campo: messaggio`)
-- `Exception` generico → 500 con messaggio generico (niente stack trace esposto)
-
-## Middleware
-
-- **Request-id**: header `X-Request-Id` (UUID per richiesta) + `X-Process-Time`
-- **CORS**: origins consentiti (`localhost:4200`, `localhost:5173`)
-
-## Persistenza (Giorno 3)
-
-- `src/db/session.py` — engine async + `async_sessionmaker` + `get_db` (sessione per-request via `Depends`).
-- `src/db/models.py` — `ChatSession` (1→N) `ChatMessage`: `Mapped`/`mapped_column`, UUID, `relationship` con `cascade="all, delete-orphan"` e `back_populates`.
-- `src/db/repos.py` — `ChatRepository`: isola l'accesso al DB; `find_session` usa `selectinload` per evitare N+1.
-- `src/services/chat_service.py` — orchestrazione: risolve la sessione, persiste i messaggi user/assistant.
-- Sessione inesistente → `404 CHAT_SESSION_NOT_FOUND`.
-
-### Starter del collega (difetti individuati/corretti)
-
-`starter-collega` non è presente nel repo; per indicazione del progetto la funzionalità è
-stata implementata da zero su `src/llm/`, `src/services/` e `src/prompts/`. In fase di
-implementazione sono stati individuati e corretti questi difetti:
-
-1. **Tipo `Mapped[str]` su colonna UUID** — dichiarare `id: Mapped[str]` su una colonna `UUID(as_uuid=True)` mente sul tipo runtime (SQLAlchemy torna un oggetto `UUID`, non `str`) → pydantic rifiutava la risposta con `Input should be a valid string`. Corretto tipizzando il layer DB con `uuid.UUID` e convertendo a `str` solo nel confine API dove `ChatResponse` lo richiede.
-2. **Pool condiviso tra event loop nei test** — con `asyncio_mode=auto` ogni test ha un loop nuovo ma le connessioni asyncpg del pool restavano legate al loop precedente → `RuntimeError: Event loop is closed`. Corretto con un engine dedicato `NullPool` per-test via `dependency_overrides` su `get_db`.
-3. **Risposta del provider costruita dentro il service** — costruire il client LLM nell'endpoint significa aprire/chiudere il pool HTTP e il TLS a ogni richiesta, e rende i test dipendenti dalla rete. Corretto con una factory singleton (`get_llm_provider`) iniettata con `Depends`, sostituibile nei test.
-4. **429 senza `retry_after`** — `RateLimitError` portava l'attributo ma il global handler non lo esponeva: il client non sapeva quando riprovare. Corretto propagando `retry_after` nel body e nell'header `Retry-After` (vedi `src/main.py`).
-5. **Temperature ignorata / non controllata** — nessuna scelta esplicita per compito. Corretto: categorizzazione ~temperatura bassa (structured output via Instructor), chat a 0.3 nei provider; `temperature` vive dentro il provider, non nella firma `complete` (evita di far trapelare dettagli fornitore nel contratto).
-
-### Pipeline RAG — difetti del codice lezione corretti
-
-La pipeline RAG del Giorno 5 è stata implementata da zero, seguendo la lezione come riferimento ma correggendo in anticipo i difetti più insidiosi:
-
-1. **Ingerimento senza delete preliminare** — inserire due volte lo stesso documento crea duplicati nei top-k (riduzione contesto utile); corretto con `DELETE ... WHERE document_id = ?` nella stessa transazione prima dell'insert.
-2. **Nessuna soglia di `min_similarity`** — il top-k restituisce sempre 5 chunk anche su domande fuori dominio; corretto con filtro `WHERE similarity >= threshold` applicato nella query SQL, con default misurabile.
-3. **Servizi costruiti dentro l'endpoint** — `EmbeddingClient()` e i service istanziati inline nel corpo della rotta rendevano impossibile il mock nei test; corretto con `Depends` e dependency override.
-4. **System prompt inline** — il prompt dell'advisor era scritto direttamente nel codice Python; corretto con file versionato (`src/prompts/advice_system_v1.md`) caricato dallo stesso loader del resto del progetto.
-5. **`Strict=True` mancante nello zip** — se la lista dei chunks e quella degli embedding avessero lunghezze diverse, Python avrebbe incollato sbagliati in silenzio; corretto con `zip(..., strict=True)`, che alza errore esplicito.
-6. **Migration senza `CREATE EXTENSION` manuale** — `--autogenerate` non propone `CREATE EXTENSION vector`; corretto scrivendo la migration a mano con `op.execute(...)` prima della `create_table`, e indice HNSW dedicato su `vector_cosine_ops`.
-
-## Integrazione LLM (Giorno 4)
-
-- `src/llm/types.py` — dati del dominio LLM: `Message` (ruoli Literal, incl. `"tool"`, come da procedura), `LLMResponse` (testo + token + costo + modello), `StreamChunk` (ultimo chunk con contabilità). Re-esportati da `client.py`, che resta l'unico modulo che il codice applicativo importa.
-- `src/llm/client.py` — `LLMProvider` (Protocol strutturale) + re-export dei tipi. Non esistono classi base da ereditare.
-- `src/llm/openai_provider.py` / `anthropic_provider.py` — le tre divergenze (system prompt, lettura risposta, conteggio token) vivono **solo qui**. Costo calcolato separando input/output (tariffe diverse); `PRICING` come dato, non costante.
-- `src/llm/retry.py` — backoff esponenziale via tenacity (1s,2s,4s,8s). Gli SDK sono costruiti con `max_retries=0` per evitare retry doppi (SDK + wrapper).
-- `src/llm/factory.py` — `get_llm_provider`: singleton a partire da `DEFAULT_MODEL` (`gpt*` → OpenAI, `claude*` → Anthropic), da usare sempre con `Depends`.
-- `src/prompts/` — prompt versionati come file (`chat_system_v1.md`, `categorize_system_v1.md`): review-able, diff-able, confrontabili dal Giorno 6. Caricati da `src/llm/prompts.py`.
-- `src/services/categorize_service.py` — `CategorizeService` con Instructor: schema Pydantic imposto al modello, `max_retries=2` per i retry su validazione e `temperature=0.0` per un output deterministico (come da procedura).
-- `src/observability/cost_tracker.py` — `CostTracker`: somma di `chat_messages.cost_eur` della giornata; sopra soglia → `RateLimitError` (→ 429 con `Retry-After`). `date | None = None` nella firma evita il default valutato all'import (B008).
-- Streaming: `/api/ai/chat/stream` usa SSE con `data: {"delta": "..."}` per evitare rotture da a-capo, termina con `data: [DONE]`. La contabilità streaming arriva nell'ultimo chunk (`include_usage` su OpenAI, `get_final_message().usage` su Anthropic).
-- Cost tracking: ogni `ChatMessage` assistant salva `tokens`, `cost_eur`, `model_used`. Vedi `docs/llm-cost-experiment.md` per i numeri misurati e le query SQL.
-
-### Pipeline RAG completa (Giorno 5)
-
-**Chunking e dimensione**: `chunk_size=500`/`overlap=50` con split a fine frase per la prosa regolamentare. La banda 400-800 caratteri (default Lipari) è dove un paragrafo di regolamento sta tipicamente intero senza diluire il vettore su troppi argomenti. L'overlap al 10% copre frasi a cavallo fra due chunk, un costo accettabile (~10% di duplicazione) che evita informazioni perse nei bordi. Per i tarifari non si chunka la tabella: a monte dell'ingestione la tabella è convertita in prosa, con intestazione ripetuta per riga (una tabella tagliata a metà è illeggibile). Per le FAQ, l'unità naturale è la coppia Q/A; una richiesta lunga ~200 caratteri sta in un singolo chunk, quindi il chunking strutturale vince su quello dimensionale e l'overlap non serve.
-
-**pgvector e scelta di architettura**: testo e vettore stanno nella stessa riga (`document_chunks`), quindi una query sola (top-k cosine con filtro `min_similarity`), un solo sistema da gestire e i filtri (domani anche permessi) sono un `WHERE` accanto all'ordinamento. L'HNSW è approssimato e va bene: il risultato finisce in un prompt, e sotto le migliaia di righe la scansione è comunque veloce.
-
-**Delete-before-insert (re-ingest)**: l'IngestService cancella i chunk esistenti per `document_id` nella stessa transazione PRIMA di inserire. Senza questo passaggio, ingerire due volte lo stesso documento produce duplicati che occupano i primi posti del retrieval, riducendo il contesto utile nei top-5.
-
-**Embedding model (locale, no API key)**: non essendo disponibile una `OPENAI_API_KEY` valida, gli embedding usano un modello locale con `sentence-transformers`: `paraphrase-multilingual-MiniLM-L12-v2` (384 dim). Scelto multilingue perché i documenti del dominio sono in Italiano (l'alternativa `all-MiniLM-L6-v2` è addestrata quasi solo sull'inglese). Il client carica il modello lazy, lo esegue in `asyncio.to_thread` e normalizza i vettori; `EMBEDDING_MODEL`/`EMBEDDING_DIM` vivono in `.env` e il modello va SOLO cambiato insieme a una migration (vedi lezione Giorno 5): `document_chunks.embedding` è `vector(384)`.
-
-**Min-similarity threshold**: RAGService applica una soglia di 0.45 prima di passare i chunk al modello. Domande fuori dominio restituiscono (basso) similarity → soglia filtrata → refusal. Il valore è stato ricalibrato sulla distribuzione misurata col modello locale: in dominio 0.50-0.72, fuori dominio ≤0.41 (con OpenAI `text-embedding-3-small` i valori sono più alti e la soglia 0.6 originale era pensata per quello). Vedi `docs/rag-recall-experiment.md`.
-
-**Prompt versionato**: il system prompt dell'advisor è in `src/prompts/advice_system_v1.md` (non inline), caricato dallo stesso loader dei prompt della chat. Consente review, diff, confronto e versionamento indipendente dal codice.
-
-**Dipendenze via Inject**: EmbeddingClient, RetrievalService, IngestService e RAGService sono costruiti con `Depends` nell'endpoint, non dentro la rotta. Sostituibili dai test (e domani da un container DI), senza modificare la logica applicativa.
-
-**Caveat sulle citations**: le citations restituite dal RAG sono i chunk recuperati (fonti consultate), non quelli che il modello ha effettivamente usato. Un LLM può ignorare 4 dei 5 chunk e la risposta uscirà comunque con 5 citazioni. Le citazioni credibili si estraggono dai marcatori `[doc_id: ...]` che il modello ha scritto, incrociandoli con i chunk recuperati — nelle versioni successive del sistema.
-
-## Development
-
-```bash
-# Type check
-uv run mypy src/
-
-# Lint
-uv run ruff check src/ tests/ alembic/env.py
-
-# Format
-uv run ruff format src/ tests/ alembic/env.py
-
-# Test
-uv run pytest
-
-# Migration
-uv run alembic revision --autogenerate -m "desc"
-uv run alembic upgrade head
-uv run alembic downgrade -1
+```json
+{
+  "status": "DEGRADED",
+  "timestamp": "2026-09-25T10:34:54.066513Z",
+  "app_name": "LipariBank AI",
+  "version": "1.0.0",
+  "environment": "local",
+  "credentials": {
+    "openai_configured": false,
+    "anthropic_configured": false,
+    "missing": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+  }
+}
 ```
 
-## Project Structure
+`/health` restituisce `200` con `status: UP` solo se le credenziali richieste sono presenti, e
+`503` con `status: DEGRADED` se ne manca qualcuna. La risposta dice sempre in quale ambiente sta
+girando l'app e quali credenziali mancano, ma **mai** i loro valori.
+
+## Come funziona
+
+- `/api/chat` (main + RAG): il messaggio viene embeddato, si cercano k chunk simili in pgvector e
+  il contesto recuperato viene passato al modello con le fonti numerate `[1]`, `[2]`.
+- `/api/advice`: genera un piano d'azione con struttura fissa e controlla che ogni affermazione sia
+  supportata da una citazione (allineamento, astensione).
+- `/api/categorize`: classifica la transazione in una delle 6 categorie previste e valuta la
+  confidenza.
+- Console web statica in `web/`, servita dalla stessa origin (nessun CORS necessario).
+
+## Struttura del progetto
 
 ```
 src/
-├── api/
-│   ├── chat.py        # POST /api/ai/chat, POST /api/ai/chat/stream (SSE)
-│   ├── categorize.py  # POST /api/ai/categorize (Instructor)
-│   └── advice.py      # POST /api/ai/advice (RAG), POST /api/ai/documents/ingest
-├── llm/
-│   ├── client.py          # Protocol LLMProvider (+ re-export tipi da types.py)
-│   ├── types.py           # Message, LLMResponse, StreamChunk
-│   ├── openai_provider.py # OpenAIProvider (cost tracking, stream con usage)
-│   ├── anthropic_provider.py # AnthropicProvider (system separato, stream con usage)
-│   ├── retry.py           # tenacity: backoff esponenziale sugli errori transitori
-│   ├── prompts.py         # caricamento dei prompt versionati da src/prompts/
-│   ├── embedding_client.py # EmbeddingClient: embed via sentence-transformers locale (384 dim)
-│   └── factory.py         # get_llm_provider (singleton, Depends)
-├── lib/
-│   └── chunking.py    # chunk_text: recursive fixed-size con overlap e split a fine frase
-├── prompts/
-│   ├── chat_system_v1.md       # system prompt chat (versionato)
-│   ├── categorize_system_v1.md  # system prompt categorizzazione (versionato)
-│   └── advice_system_v1.md      # system prompt advisor RAG (versionato, Giorno 5)
-├── observability/
-│   └── cost_tracker.py    # CostTracker: budget giornaliero -> 429
-├── db/
-│   ├── models.py      # SQLAlchemy 2.0: ChatSession, ChatMessage, DocumentChunk (pgvector)
-│   ├── repos.py       # ChatRepository (selectinload, no N+1)
-│   ├── session.py     # engine async + get_db per-request
-│   └── __init__.py
-├── services/
-│   ├── chat_service.py      # business logic chat + history multi-turn + persistenza
-│   ├── categorize_service.py # structured output via Instructor
-│   ├── ingest_service.py     # IngestService: doc → chunks → embeddings → DB (pgvector)
-│   ├── retrieval_service.py  # RetrievalService: query → embed → cosine top-k search
-│   └── rag_service.py        # RAGService: retrieve + generate + citation + refusal
-├── types/
-│   ├── chat.py        # ChatRequest, ChatResponse, ToolCallInfo
-│   ├── categorize.py  # CategorizeRequest, CategorizeResponse, CategoryEnum
-│   ├── advice.py      # AdviceRequest/Response, Citation, IngestRequest/Response (G5)
-│   └── error.py       # ErrorResponse globale
-├── config.py          # Pydantic Settings (env vars, incl. embedding_model)
-├── exceptions.py      # AppError + sottoclassi (RateLimitError con retry_after)
-├── middleware.py      # CORS + request-id
-└── main.py            # FastAPI app + handler + router
-scripts/
-├── cost_experiment.py      # dry-run del costo: 10 conversazioni x 5 turni + report SQL
-├── async_vs_sync.py        # async vs sync benchmark (PostgreSQL I/O)
-└── ingest_docs.py          # bulk ingest: legge data/docs/*.md e POST /api/ai/documents/ingest
-alembic/
-├── env.py             # configurato per engine async
-├── versions/          # migration versionate
-└── script.py.mako
-docker-compose.yml     # PostgreSQL 16 + pgvector (porta 5433)
-docs/
-├── llm-cost-experiment.md
-├── async-vs-sync-experiment.md
-└── rag-recall-experiment.md  # Recall@3 su 10 Q&A ground truth (G5)
-data/
-└── docs/
-    ├── commissioni_bonifico.md
-    ├── regolamento_conti.md
-    ├── condizioni_carta_credito.md
-    └── faq_supporto.md
-tests/
-├── conftest.py
-├── fakes.py           # FakeLLMProvider / FakeCategorizeService / FakeEmbeddingClient
-├── test_health.py
-├── test_chat.py       # incl. budget 429 e streaming SSE
-├── test_categorize.py
-├── test_types.py
-├── test_chunking.py   # chunk_text: overlap, split frase, ordine, isolamento
-└── test_advice.py     # ingest, retrieval, RAG wiring, min_similarity filtering
+  main.py              # app FastAPI, health, handler errori
+  config.py            # settings tipizzate (Pydantic Settings, SecretStr, fail-fast)
+  api/                 # router: chat, advice, categorize
+  db/                  # modelli SQLAlchemy, sessione, vettori pgvector
+  llm/                 # factory, client OpenAI/Anthropic, embedding client
+  rag/                 # chunking e retrieval ibrido
+  services/            # logica applicativa: chat, advice, categorize, ingest, retrieval
+  schemas/             # modelli di richiesta/risposta
+  prompts/             # prompt su file, versionati e ispezionabili
+  middleware/          # request id, logging
+tests/                 # test unitari e di contratto
+scripts/               # benchmark di asyncio (sync vs async)
+docs/ai-review/        # review G1
+docs/recap-g1-v3.md    # appunti di studio G1
 ```
+
+## Comandi
+
+| Azione | Comando |
+| --- | --- |
+| Avvio | `uv run uvicorn src.main:app --reload` |
+| Formattazione | `uv run ruff format .` |
+| Controllo formato | `uv run ruff format --check .` |
+| Lint | `uv run ruff check .` |
+| Type check | `uv run mypy src tests scripts alembic/env.py` |
+| Test (default, senza eval) | `uv run pytest` |
+| Solo test eval (servono API key) | `uv run pytest -m eval` |
+| Migrazioni | `uv run alembic upgrade head` |
+| Database | `docker compose up -d db` |
+| Ambiente pulito | `Remove-Item -Recurse -Force .venv` poi `uv sync --locked` |
+
+`uv run pytest` esclude di default i test `eval` (costosi, chiamano le API reali): si eseguono solo
+su richiesta esplicita con `uv run pytest -m eval`. `mypy` gira in modalità strict su `src`, `tests`,
+`scripts` e `alembic/env.py`, senza eccezioni per i test.
+
+## Configurazione
+
+| Variabile | Default | Note |
+| --- | --- | --- |
+| `ENVIRONMENT` | `local` | `local`, `test`, `staging`, `production` |
+| `DATABASE_URL` | - | obbligatoria, stringa di connessione con driver async |
+| `OPENAI_API_KEY` | - | facoltativa all'avvio, richiesta da OpenAI |
+| `ANTHROPIC_API_KEY` | - | facoltativa all'avvio, richiesta da Anthropic |
+| `JWT_SECRET` | - | obbligatoria, almeno 32 caratteri |
+| `MAX_TOKENS_PER_REQUEST` | `2000` | limite per singola richiesta LLM |
+| `LLM_TIMEOUT_SECONDS` | `60.0` | timeout delle chiamate esterne |
+| `MAX_DAILY_COST_EUR` | `5.0` | budget giornaliero |
+| `HISTORY_MAX_MESSAGES` | `20` | messaggi di cronologia mantenuti |
+
+L'elenco completo e commentato è in `.env.example` (una riga di commento per variabile). Il file
+`.env` non è tracciato in Git e i segreti restano fuori dal repository.
+
+## Sicurezza
+
+- Nessun segreto nel codice: le chiavi sono `SecretStr`, lette solo da `.env` e richieste
+  (`require_secret`) solo quando serve il provider.
+- `/health` espone solo booleani e nomi delle variabili mancanti, mai valori o frammenti.
+- I messaggi di errore di configurazione non includono l'input ricevuto, quindi non possono
+  stampare un segreto per sbaglio.
+
+## Ricostruzione dell'ambiente (verifica reale)
+
+- Cosa ho fatto: cancellato il virtualenv e ricreato da zero con `uv venv --clear` seguito da
+  `uv sync --locked`.
+- Tempo misurato: **~17 secondi** (93 pacchetti, con cache `uv` locale già calda; dalla cache
+  vuota il primo sync scarica anche torch e transformers e richiede più tempo).
+- Primo ostacolo per un collega: non è tecnico, è creare `.env` con `JWT_SECRET` e le chiavi API
+  (senza, l'app si ferma con il messaggio fail-fast) e avere Docker attivo per PostgreSQL.
+- Nota Windows: se la console non mostra correttamente le lettere accentate nei messaggi,
+  digita `chcp 65001` per passare la console a UTF-8.
+
+## Tecnologie usate
+
+- Python 3.12 (tipizzazione stretta, `Protocol`, `async`/`await`)
+- FastAPI + Pydantic v2 + pydantic-settings
+- SQLAlchemy 2 async + asyncpg + pgvector
+- httpx, tenacity, structlog
+- pytest + pytest-asyncio, ruff, mypy strict
+- uv per ambiente e dipendenze riproducibili
+
+## Roadmap
+
+- **Milestone 1 - Fondazione (COMPLETATA)**: struttura, config, DB, Docker, middleware, health.
+  Gate G1 v3 verificato: lockfile, tipi, segreti, health veritiero, ricostruzione da zero.
+- **Milestone 2 - Dominio e AI (COMPLETATA)**: RAG ibrido, embedding, classificazione, advice.
+- **Milestone 3 - Qualità (COMPLETATA)**: test suite, eval, CI, review.
+- **Milestone 4 - Hardening**: auth JWT reale, rate limit, osservabilità, budget enforcement.
+- **Milestone 5 - Produzione**: deploy, monitoraggio, documentazione operativa.
+
+## Note
+
+Progetto didattico. Le valutazioni quantitative (eval su dataset) sono indicative e vanno
+rivalidate prima di qualsiasi uso in produzione.

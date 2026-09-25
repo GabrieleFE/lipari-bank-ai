@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.llm.embedding_client import EmbeddingClient
+from src.llm.embedding_client import EmbeddingClientProtocol
 
 
 class RetrievalResult(BaseModel):
@@ -14,7 +14,7 @@ class RetrievalResult(BaseModel):
 
 
 class RetrievalService:
-    def __init__(self, session: AsyncSession, embedding_client: EmbeddingClient) -> None:
+    def __init__(self, session: AsyncSession, embedding_client: EmbeddingClientProtocol) -> None:
         self.session = session
         self.embedding_client = embedding_client
 

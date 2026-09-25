@@ -2,7 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
-from src.config import settings
+from src.config import require_secret, settings
 from src.services.categorize_service import CategorizeService
 from src.types.categorize import CategorizeRequest, CategorizeResponse
 
@@ -24,7 +24,7 @@ def get_categorize_service(model: str | None = None) -> CategorizeService:
 
         _instructor_client = instructor.from_openai(
             AsyncOpenAI(
-                api_key=settings.openai_api_key,
+                api_key=require_secret(settings.openai_api_key, "OPENAI_API_KEY"),
                 timeout=settings.llm_timeout_seconds,
                 max_retries=0,
             )

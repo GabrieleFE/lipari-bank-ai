@@ -1,6 +1,6 @@
 """Factory: l'unico posto che decide quale provider usare, da una riga di configurazione."""
 
-from src.config import settings
+from src.config import require_secret, settings
 from src.llm.anthropic_provider import AnthropicProvider
 from src.llm.client import LLMProvider
 from src.llm.openai_provider import OpenAIProvider
@@ -25,7 +25,9 @@ def get_llm_provider(model: str | None = None) -> LLMProvider:
 
 def _build_provider(model: str) -> LLMProvider:
     if model.startswith("gpt"):
-        return OpenAIProvider(settings.openai_api_key, model)
+        return OpenAIProvider(require_secret(settings.openai_api_key, "OPENAI_API_KEY"), model)
     if model.startswith("claude"):
-        return AnthropicProvider(settings.anthropic_api_key, model)
+        return AnthropicProvider(
+            require_secret(settings.anthropic_api_key, "ANTHROPIC_API_KEY"), model
+        )
     raise ValueError(f"Unknown model: {model}")

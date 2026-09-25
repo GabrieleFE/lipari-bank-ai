@@ -3,11 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import DocumentChunk
 from src.lib.chunking import chunk_text
-from src.llm.embedding_client import EmbeddingClient
+from src.llm.embedding_client import EmbeddingClientProtocol
 
 
 class IngestService:
-    def __init__(self, session: AsyncSession, embedding_client: EmbeddingClient) -> None:
+    def __init__(self, session: AsyncSession, embedding_client: EmbeddingClientProtocol) -> None:
         self.session = session
         self.embedding_client = embedding_client
 

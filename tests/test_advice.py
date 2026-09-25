@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Generator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -30,7 +30,7 @@ async def clean_document_chunks() -> AsyncIterator[None]:
 
 
 @pytest.fixture()
-def fake_embedding_client() -> FakeEmbeddingClient:
+def fake_embedding_client() -> Generator[FakeEmbeddingClient, None, None]:
     client = FakeEmbeddingClient()
     app.dependency_overrides[get_embedding_client] = lambda: client
     yield client

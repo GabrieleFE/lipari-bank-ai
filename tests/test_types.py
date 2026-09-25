@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from pydantic import ValidationError
 
 from src.types.advice import (
@@ -35,7 +37,7 @@ def test_chat_response_tool_calls_default_empty() -> None:
         tokens_used=1,
         cost_eur=0.0,
         model_used="dummy",
-        created_at="2024-01-01T00:00:00Z",
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
     assert response.tool_calls == []
 
@@ -48,7 +50,7 @@ def test_chat_response_with_tool_calls() -> None:
         tokens_used=1,
         cost_eur=0.0,
         model_used="dummy",
-        created_at="2024-01-01T00:00:00Z",
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
     )
     assert response.tool_calls[0].name == "check_balance"
     assert response.tool_calls[0].result is None
@@ -62,7 +64,7 @@ def test_chat_response_rejects_negative_tokens() -> None:
             tokens_used=-1,
             cost_eur=0.0,
             model_used="dummy",
-            created_at="2024-01-01T00:00:00Z",
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
         )
         raise AssertionError("Should have raised")
     except ValidationError:
@@ -105,11 +107,13 @@ def test_categorize_response_confidence_bounds() -> None:
 
 def test_categorize_response_invalid_category_rejected() -> None:
     try:
-        CategorizeResponse(
-            category="INVALID",
-            subcategory="X",
-            confidence=0.5,
-            reasoning="bad",
+        CategorizeResponse.model_validate(
+            {
+                "category": "INVALID",
+                "subcategory": "X",
+                "confidence": 0.5,
+                "reasoning": "bad",
+            }
         )
         raise AssertionError("Should have raised")
     except ValidationError:
@@ -118,7 +122,7 @@ def test_categorize_response_invalid_category_rejected() -> None:
 
 def test_error_response_optional_details() -> None:
     err = ErrorResponse(
-        timestamp="2024-01-01T00:00:00Z",
+        timestamp=datetime(2024, 1, 1, tzinfo=UTC),
         status=422,
         error="VALIDATION_ERROR",
         message="Input non valido",

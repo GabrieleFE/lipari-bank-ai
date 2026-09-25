@@ -14,6 +14,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.sql.elements import TextClause
 
 from src.config import settings
 
@@ -21,13 +22,13 @@ DOCS = Path(__file__).resolve().parent.parent / "docs" / "async-vs-sync-experime
 POOL_SIZE = 100
 
 
-async def run_query(session_factory: async_sessionmaker[AsyncSession], stmt: text) -> None:
+async def run_query(session_factory: async_sessionmaker[AsyncSession], stmt: TextClause) -> None:
     async with session_factory() as session:
         await session.execute(stmt)
 
 
 async def run_sequential(
-    session_factory: async_sessionmaker[AsyncSession], stmt: text, n: int
+    session_factory: async_sessionmaker[AsyncSession], stmt: TextClause, n: int
 ) -> float:
     start = time.perf_counter()
     for _ in range(n):
@@ -36,7 +37,7 @@ async def run_sequential(
 
 
 async def run_parallel(
-    session_factory: async_sessionmaker[AsyncSession], stmt: text, n: int
+    session_factory: async_sessionmaker[AsyncSession], stmt: TextClause, n: int
 ) -> float:
     start = time.perf_counter()
     await asyncio.gather(*(run_query(session_factory, stmt) for _ in range(n)))

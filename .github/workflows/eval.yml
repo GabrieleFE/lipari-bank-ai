@@ -1,18 +1,52 @@
 name: Weekly Eval
 
 on:
+  push:
+  pull_request:
   schedule:
     - cron: "0 6 * * 1" # ogni lunedi' 6 AM UTC
   workflow_dispatch: # on-demand: `uv run pytest -m eval` anche dagli eval locali
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql+asyncpg://lipari:lipari@localhost:5432/lipari_ai
+      JWT_SECRET: dummy-secret-for-ci-only-not-a-real-credential-000000
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: lipari
+          POSTGRES_PASSWORD: lipari
+          POSTGRES_DB: lipari_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lipari -d lipari_ai"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv lock --check
+      - run: uv sync --locked
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy src tests scripts alembic/env.py
+      - run: uv run alembic upgrade head
+      - run: uv run pytest -v
+
   eval:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv sync
+      - run: uv sync --locked
       - run: uv run pytest -m eval -v
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

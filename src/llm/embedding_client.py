@@ -12,12 +12,20 @@ una migration.
 """
 
 import asyncio
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from src.config import settings
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
+
+
+class EmbeddingClientProtocol(Protocol):
+    dim: int
+
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+    async def embed_one(self, text: str) -> list[float]: ...
 
 
 class EmbeddingClient:

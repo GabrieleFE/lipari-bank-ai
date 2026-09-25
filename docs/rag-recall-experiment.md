@@ -50,6 +50,7 @@ GROUND_TRUTH = [
     ("Qual è il costo massimo dello scoperto concesso sul conto?", "regolamento_conti"),
 ]
 
+
 async def main():
     engine = create_async_engine(settings.database_url, poolclass=NullPool)
     session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -64,8 +65,9 @@ async def main():
             correct += int(found)
             sim = max((r.similarity for r in results), default=0)
             print(f"{i:2d}. {mark} sim={sim:.3f}  {q}")
-        print(f"\nRecall@3: {correct}/{len(GROUND_TRUTH)} ({correct/len(GROUND_TRUTH):.0%})")
+        print(f"\nRecall@3: {correct}/{len(GROUND_TRUTH)} ({correct / len(GROUND_TRUTH):.0%})")
     await engine.dispose()
+
 
 asyncio.run(main())
 ```
