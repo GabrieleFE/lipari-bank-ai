@@ -159,6 +159,16 @@
     <div class="result" id="adv_result" hidden></div>
   </section>
 
+  <!-- MOVEMENTS IMPORT -->
+  <section class="card">
+    <h2>📥 Import movimenti <span class="endpoint">POST /api/ai/movements/import</span></h2>
+    <p class="hint">CSV con intestazione <code>date,description,amount,currency</code>. Le righe non valide
+      tornano con il loro numero e il motivo: nessuna riga sparisce, nessuna passa per buona.</p>
+    <div><label>File CSV</label><input id="imp_file" type="file" accept=".csv,text/csv"></div>
+    <button class="primary" id="imp_btn" onclick="runImport()">Importa</button>
+    <div class="result" id="imp_result" hidden></div>
+  </section>
+
   <!-- INGEST -->
   <section class="card">
     <h2>📄 Ingest documento <span class="endpoint">POST /api/ai/documents/ingest</span></h2>
@@ -417,6 +427,41 @@ Recesso senza penali in qualsiasi momento; chiusura entro 30 giorni dalla richie
       const { ok, status, data } = await callApi('/api/ai/documents/ingest', { document_id, content });
       renderJson('ing_result', data, status);
     } finally { setBtn('ing_btn', false); }
+  }
+
+  async function runImport() {
+    const input = document.getElementById('imp_file');
+    if (!input.files.length) return alert('Scegli un file CSV');
+    const form = new FormData();
+    form.append('file', input.files[0]);
+    setBtn('imp_btn', true, 'Importo…');
+    try {
+      const res = await fetch('/api/ai/movements/import', { method: 'POST', body: form });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      const el = document.getElementById('imp_result');
+      el.hidden = false;
+      el.innerHTML = '';
+      if (!res.ok) { renderJson('imp_result', data, res.status); return; }
+      const badge = document.createElement('span');
+      badge.className = 'badge ok';
+      badge.textContent = `${data.imported_count} importate · ${data.problems.length} scartate`;
+      el.appendChild(badge);
+      for (const p of data.problems) {
+        const div = document.createElement('div');
+        div.className = 'cite';
+        const head = document.createElement('div');
+        head.className = 'src';
+        head.textContent = `riga ${p.row}` + (p.field ? ` · campo ${p.field}` : '');
+        div.appendChild(head);
+        const body = document.createElement('div');
+        body.textContent = p.reason;
+        div.appendChild(body);
+        el.appendChild(div);
+      }
+      el.style.borderColor = 'var(--green)';
+    } finally { setBtn('imp_btn', false); }
   }
 
   checkHealth();

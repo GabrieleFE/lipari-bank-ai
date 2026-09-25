@@ -1,7 +1,7 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, ValidationError, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "test", "staging", "production"]
 
@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     app_name: str = Field(default="LipariBank AI", min_length=1)
     environment: Environment = "local"
     debug: bool = False
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:4200", "http://localhost:5173"],
+        min_length=1,
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def split_cors_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
     database_url: str = Field(min_length=1)
     openai_api_key: SecretStr | None = None

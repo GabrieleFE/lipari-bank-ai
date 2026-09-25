@@ -6,21 +6,23 @@ from typing import Any
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.config import settings
+
 
 def setup_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def add_request_id(request: Request, call_next: Callable[..., Any]) -> Response:
-        request_id = str(uuid.uuid4())
-        start = time.time()
+        request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+        start = time.perf_counter()
         response: Response = await call_next(request)
         response.headers["X-Request-Id"] = request_id
-        response.headers["X-Process-Time"] = str(round(time.time() - start, 4))
+        response.headers["X-Process-Time"] = f"{time.perf_counter() - start:.4f}"
         return response
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:4200", "http://localhost:5173"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
         allow_credentials=True,
     )

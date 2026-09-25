@@ -97,7 +97,23 @@ async def test_request_id_header_present() -> None:
     assert response.headers["x-request-id"]
 
 
-async def test_cors_headers_present() -> None:
+async def test_incoming_request_id_is_echoed_back() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/health", headers={"Origin": "http://localhost:4200"})
-    assert response.headers.get("access-control-allow-origin") == "http://localhost:4200"
+        response = await client.get("/health", headers={"X-Request-Id": "req-123"})
+    assert response.headers["x-request-id"] == "req-123"
+
+
+async def test_two_requests_get_two_different_request_ids() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.get("/health")
+        second = await client.get("/health")
+    assert first.headers["x-request-id"] != second.headers["x-request-id"]
+
+
+async def test_cors_allows_only_the_configured_origins() -> None:
+    allowed = settings.cors_origins[0]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        allowed_response = await client.get("/health", headers={"Origin": allowed})
+        refused_response = await client.get("/health", headers={"Origin": "https://example.com"})
+    assert allowed_response.headers.get("access-control-allow-origin") == allowed
+    assert "access-control-allow-origin" not in refused_response.headers

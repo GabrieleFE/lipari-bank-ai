@@ -30,6 +30,7 @@ Apri `.env` e compila:
 - `APP_NAME`, `ENVIRONMENT` (`local` in sviluppo), `DEBUG`
 - `DATABASE_URL` (stesso valore di `docker-compose.yml`)
 - `OPENAI_API_KEY` e/o `ANTHROPIC_API_KEY`: facoltative per l'avvio, obbligatorie per usare i provider
+- `CORS_ORIGINS`: elenco di origini autorizzate separate da virgola, default `http://localhost:4200`
 - modelli: `DEFAULT_MODEL`, `CATEGORIZE_MODEL`, `JUDGE_MODEL`, `EMBEDDING_MODEL`
 - parametri: `EMBEDDING_DIM`, `MAX_TOKENS_PER_REQUEST`, `LLM_TIMEOUT_SECONDS`,
   `MAX_DAILY_COST_EUR`, `HISTORY_MAX_MESSAGES`
@@ -99,6 +100,47 @@ Esempio di risposta quando le chiavi dei modelli non sono configurate:
 `503` con `status: DEGRADED` se ne manca qualcuna. La risposta dice sempre in quale ambiente sta
 girando l'app e quali credenziali mancano, ma **mai** i loro valori.
 
+## Import movimenti da CSV (Giorno 2)
+
+`POST /api/ai/movements/import` accetta un file CSV con intestazione esatta
+`date,description,amount,currency` e risponde con quante righe sono state importate e l'elenco delle
+righe scartate, ognuna con il proprio numero e il motivo.
+
+```bash
+curl.exe -X POST http://localhost:8000/api/ai/movements/import -F "file=@data/movements_sample.csv"
+```
+
+```json
+{
+  "imported_count": 18,
+  "problems": [
+    { "row": 8, "field": "amount", "reason": "amount: deve essere maggiore di zero (valore ricevuto: -180.00)" },
+    { "row": 13, "field": null, "reason": "riga: ha 3 colonne, l'intestazione ne dichiara 4" }
+  ]
+}
+```
+
+Un file che non è un CSV (intestazione diversa), un file vuoto o un file che il server non riesce a
+leggere non producono mai un `500`: sono errori di dominio e tornano nella busta unica
+`ErrorResponse` (`timestamp`, `status`, `error`, `message`, `path`, `details`) con i codici
+`INVALID_CSV_HEADER`, `EMPTY_IMPORT_FILE` e `IMPORT_FILE_NOT_CSV`. Un file oltre 5 MB viene rifiutato
+con `413 IMPORT_FILE_TOO_LARGE`. La console web ha la card "Import movimenti" per fare la stessa
+richiesta dal browser.
+
+#### Scelta: import parziale con elenco dei problemi
+
+L'endpoint non è "tutto o niente": conta come importate le righe valide e restituisce le scartate con
+numero di riga, campo e motivo in italiano leggibile. Così l'utente sistema i dati reali del file
+invece di risolvere un errore alla volta; la risposta resta comunque un `200` perché il file *è* stato
+elaborato, e ogni riga è o importata o motivata, mai ignorata in silenzio. L'import è stateless: non
+scrive sul database, quindi rieseguire lo stesso file non duplica nulla.
+
+## Tracciabilità delle richieste
+
+Ogni risposta riporta `X-Request-Id` (se la richiesta ne porta uno, viene ecoato) e `X-Process-Time`.
+Il CORS è chiuso per default: risponde solo alle origini elencate in `CORS_ORIGINS`, con metodi e
+header dichiarati esplicitamente.
+
 ## Come funziona
 
 - `/api/chat` (main + RAG): il messaggio viene embeddato, si cercano k chunk simili in pgvector e
@@ -107,6 +149,8 @@ girando l'app e quali credenziali mancano, ma **mai** i loro valori.
   supportata da una citazione (allineamento, astensione).
 - `/api/categorize`: classifica la transazione in una delle 6 categorie previste e valuta la
   confidenza.
+- `/api/ai/movements/import`: valida un CSV di movimenti riga per riga con i contratti Pydantic e
+  restituisce quante righe sono valide e perché le altre no.
 - Console web statica in `web/`, servita dalla stessa origin (nessun CORS necessario).
 
 ## Struttura del progetto
@@ -114,19 +158,22 @@ girando l'app e quali credenziali mancano, ma **mai** i loro valori.
 ```
 src/
   main.py              # app FastAPI, health, handler errori
-  config.py            # settings tipizzate (Pydantic Settings, SecretStr, fail-fast)
-  api/                 # router: chat, advice, categorize
+  config.py            # settings tipizzate (Pydantic Settings, SecretStr, fail-fast, CORS)
+  api/                 # router: chat, advice, categorize, movements
   db/                  # modelli SQLAlchemy, sessione, vettori pgvector
   llm/                 # factory, client OpenAI/Anthropic, embedding client
   rag/                 # chunking e retrieval ibrido
-  services/            # logica applicativa: chat, advice, categorize, ingest, retrieval
+  services/            # logica applicativa: chat, advice, categorize, ingest, import movimenti
   schemas/             # modelli di richiesta/risposta
+  types/               # contratti condivisi (movements import)
   prompts/             # prompt su file, versionati e ispezionabili
-  middleware/          # request id, logging
+  middleware.py        # request id, tempi di risposta, CORS
 tests/                 # test unitari e di contratto
 scripts/               # benchmark di asyncio (sync vs async)
-docs/ai-review/        # review G1
+data/                  # CSV di esempio per l'import movimenti
+docs/ai-review/        # review G1 e G2
 docs/recap-g1-v3.md    # appunti di studio G1
+docs/recap-g2-v3.md    # appunti di studio G2
 ```
 
 ## Comandi
@@ -157,6 +204,7 @@ su richiesta esplicita con `uv run pytest -m eval`. `mypy` gira in modalità str
 | `OPENAI_API_KEY` | - | facoltativa all'avvio, richiesta da OpenAI |
 | `ANTHROPIC_API_KEY` | - | facoltativa all'avvio, richiesta da Anthropic |
 | `JWT_SECRET` | - | obbligatoria, almeno 32 caratteri |
+| `CORS_ORIGINS` | `http://localhost:4200` | origini autorizzate, separate da virgola |
 | `MAX_TOKENS_PER_REQUEST` | `2000` | limite per singola richiesta LLM |
 | `LLM_TIMEOUT_SECONDS` | `60.0` | timeout delle chiamate esterne |
 | `MAX_DAILY_COST_EUR` | `5.0` | budget giornaliero |
@@ -184,6 +232,28 @@ L'elenco completo e commentato è in `.env.example` (una riga di commento per va
 - Nota Windows: se la console non mostra correttamente le lettere accentate nei messaggi,
   digita `chcp 65001` per passare la console a UTF-8.
 
+## Verifiche del gate G2 v3
+
+Tutte eseguite in locale con l'app avviata e `.venv` ricostruita da `uv sync --locked`.
+
+| # | Criterio | Come l'ho verificato | Esito |
+| --- | --- | --- | --- |
+| 1 | Esistono i 3 modelli in `src/types/movements.py` | lettura del file | OK |
+| 2 | La logica sta in `services/`, non in `api/` | lettura di `src/api/movements.py` | OK |
+| 3 | L'endpoint compare in `/docs` e risponde 200 | `curl.exe -X POST .../import -F "file=@data/movements_sample.csv"` | OK, 18/25 |
+| 4 | `imported_count` conta solo le righe valide | stessa risposta del campione: 25 righe, 18 valide | OK |
+| 5 | Ogni problema ha `row`, `field`, `reason` | ispezione della risposta (7 problemi) | OK |
+| 6 | File non-CSV o vuoto → 400 con codice, non 500 | `curl.exe -F "file=@memo.txt"` e file vuoto | `400 INVALID_CSV_HEADER`, `400 EMPTY_IMPORT_FILE` |
+| 7 | Senza file → 422 che nomina `file` | `curl.exe -X POST .../import` | `422 VALIDATION_ERROR`, `details: ["file: Field required"]` |
+| 8 | Nessun traceback o percorso nelle risposte | lettura delle 4 risposte di errore | OK |
+| 9 | `mypy` pulito | `uv run mypy src tests scripts alembic/env.py` | 58 file, 0 errori |
+| 10 | Il servizio dichiara il suo scope | docstring di `movements_import_service.py` | OK |
+| 11 | `ruff check` pulito | `uv run ruff check .` | OK |
+
+In più, sempre dal vivo: eco di `X-Request-Id` nella risposta, CORS che risponde all'origine
+configurata e non alle altre, preflight `OPTIONS` con metodi e header espliciti, e 20 test automatici
+(`tests/test_movements_import.py`, `tests/test_health.py`).
+
 ## Tecnologie usate
 
 - Python 3.12 (tipizzazione stretta, `Protocol`, `async`/`await`)
@@ -198,6 +268,8 @@ L'elenco completo e commentato è in `.env.example` (una riga di commento per va
 - **Milestone 1 - Fondazione (COMPLETATA)**: struttura, config, DB, Docker, middleware, health.
   Gate G1 v3 verificato: lockfile, tipi, segreti, health veritiero, ricostruzione da zero.
 - **Milestone 2 - Dominio e AI (COMPLETATA)**: RAG ibrido, embedding, classificazione, advice.
+  Gate G2 v3 verificato: contratti Pydantic v2, `response_model`, errori centralizzati, import CSV,
+  request id e CORS da configurazione.
 - **Milestone 3 - Qualità (COMPLETATA)**: test suite, eval, CI, review.
 - **Milestone 4 - Hardening**: auth JWT reale, rate limit, osservabilità, budget enforcement.
 - **Milestone 5 - Produzione**: deploy, monitoraggio, documentazione operativa.

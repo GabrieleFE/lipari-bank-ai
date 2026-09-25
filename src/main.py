@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from src.api import advice, categorize, chat
+from src.api import advice, categorize, chat, movements
 from src.config import Environment, Settings, secret_is_configured, settings
 from src.db.session import engine
 from src.exceptions import AppError
@@ -132,6 +132,7 @@ async def health(response: Response) -> HealthResponse:
 app.include_router(chat.router)
 app.include_router(categorize.router)
 app.include_router(advice.router)
+app.include_router(movements.router)
 
 # Test console statica (Giorno 6): servita dalla stessa origin, niente CORS.
 # Il mount va DOPO i router: le route API hanno priorita', il resto atterra su web/.
