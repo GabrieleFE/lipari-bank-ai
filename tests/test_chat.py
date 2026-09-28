@@ -105,7 +105,10 @@ async def test_chat_budget_reached_returns_429(
         )
     assert response.status_code == 429
     assert response.json()["error"] == "RATE_LIMIT"
-    assert "retry_after" in response.json()
+    # G2: retry_after non è una chiave top-level, sennò la busta smette di essere uniforme.
+    # Vive nell'header HTTP Retry-After e nel dettaglio della busta.
+    assert response.headers["Retry-After"] == "3600"
+    assert [d["field"] for d in response.json()["details"]] == ["retry_after"]
     assert fake_llm_provider.calls == []  # nessuna chiamata LLM avvenuta
 
 

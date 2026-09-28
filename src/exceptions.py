@@ -31,6 +31,11 @@ class ChatSessionNotFoundError(AppError):
         super().__init__(404, "CHAT_SESSION_NOT_FOUND", f"Sessione {session_id} non trovata")
 
 
+class AccountNotFoundError(AppError):
+    def __init__(self, account_id: str) -> None:
+        super().__init__(404, "ACCOUNT_NOT_FOUND", f"Conto {account_id} non trovato")
+
+
 class RateLimitError(AppError):
     def __init__(self, retry_after_seconds: int) -> None:
         super().__init__(

@@ -25,6 +25,7 @@ def get_chat_service(
         repo=ChatRepository(session),
         provider=provider,
         cost_tracker=CostTracker(session, settings.max_daily_cost_eur),
+        session=session,
         history_max_messages=settings.history_max_messages,
         max_tokens=settings.max_tokens_per_request,
     )

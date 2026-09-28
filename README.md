@@ -244,6 +244,9 @@ header dichiarati esplicitamente.
   confidenza.
 - `/api/ai/movements/import`: valida un CSV di movimenti riga per riga con i contratti Pydantic e
   restituisce quante righe sono valide e perché le altre no.
+- `/api/ai/accounts`: conti e saldo. I movimenti di un conto arrivano con l'intestatario dallo stesso
+  JOIN, e il riepilogo del periodo porta anche il totale per mese. Registrare un movimento scrive il
+  movimento e sposta il saldo nella stessa transazione.
 - Console web statica in `web/`, servita dalla stessa origin (nessun CORS necessario).
 
 ## Struttura del progetto
@@ -252,21 +255,22 @@ header dichiarati esplicitamente.
 src/
   main.py              # app FastAPI, health, handler errori
   config.py            # settings tipizzate (Pydantic Settings, SecretStr, fail-fast, CORS)
-  api/                 # router: chat, advice, categorize, movements
-  db/                  # modelli SQLAlchemy, sessione, vettori pgvector
+  api/                 # router: chat, advice, categorize, accounts, movements
+  db/                  # modelli SQLAlchemy, sessione, repository, seed, vettori pgvector
   llm/                 # factory, client OpenAI/Anthropic, embedding client
   rag/                 # chunking e retrieval ibrido
-  services/            # logica applicativa: chat, advice, categorize, ingest, import movimenti
+  services/            # logica applicativa: chat, advice, categorize, ingest, import, movements
   schemas/             # modelli di richiesta/risposta
-  types/               # contratti condivisi (movements import)
+  types/               # contratti condivisi (movements import, accounts)
   prompts/             # prompt su file, versionati e ispezionabili
   middleware.py        # request id, tempi di risposta, CORS
 tests/                 # test unitari e di contratto
-scripts/               # benchmark di asyncio (sync vs async)
+scripts/               # smoke delle giornate, benchmark asyncio (sync vs async), ingest
 data/                  # CSV di esempio per l'import movimenti
-docs/ai-review/        # review G1 e G2
+docs/ai-review/        # review G1, G2 e G3
 docs/recap-g1-v3.md    # appunti di studio G1
 docs/recap-g2-v3.md    # appunti di studio G2
+docs/recap-g3-v3.md    # appunti di studio G3
 ```
 
 ## Comandi
@@ -282,6 +286,9 @@ docs/recap-g2-v3.md    # appunti di studio G2
 | Solo test eval (servono API key) | `uv run pytest -m eval` |
 | Migrazioni | `uv run alembic upgrade head` |
 | Database | `docker compose up -d db` |
+| Dati di prova (G3) | `uv run python -m src.db.seed --reset` |
+| Verifiche G2 | `uv run python scripts/day2_smoke.py` |
+| Verifiche G3 | `uv run python scripts/day3_smoke.py` |
 | Ambiente pulito | `Remove-Item -Recurse -Force .venv` poi `uv sync --locked` |
 
 `uv run pytest` esclude di default i test `eval` (costosi, chiamano le API reali): si eseguono solo
@@ -357,6 +364,89 @@ come rilancio (`replayed: true`). Gli altri test coprono il contratto di base de
 La review completa, un rilievo per riga e il punto che decido di non correggere, è in
 `docs/ai-review/G2.md`.
 
+## La giornata 3: conti e movimenti
+
+Il giorno 2 validava un CSV e lo rispediva indietro, senza scrivere niente. Il giorno 3 mette quei
+movimenti dentro PostgreSQL e li rende interrogabili dal banco.
+
+```bash
+docker compose up -d db
+uv run alembic upgrade head
+uv run python -m src.db.seed --reset    # tre conti e 42 movimenti su 90 giorni
+uv run python scripts/day3_smoke.py     # le nove verifiche, compresa quella dopo il riavvio
+```
+
+### Le rotte
+
+| Rotta | Cosa risponde |
+| --- | --- |
+| `GET /api/ai/accounts` | i conti con il saldo |
+| `GET /api/ai/accounts/{id}` | un conto e il suo saldo |
+| `GET /api/ai/accounts/{id}/movements` | i movimenti **con l'intestatario e l'IBAN**, dallo stesso JOIN |
+| `GET /api/ai/accounts/{id}/summary?date_from=&date_to=` | entrate, uscite, netto e il totale raggruppato per mese |
+| `POST /api/ai/accounts/{id}/movements` | registra un movimento e sposta il saldo nella stessa transazione |
+
+Nessuna di queste rotte costruisce una `select()`: prendono una sessione, ci mettono dentro un
+`MovementService` e gli chiedono il risultato. Se un endpoint sa scrivere SQL, il confine fra "cosa il
+banco vuole" e "come si arriva ai dati" non esiste più, e il giorno dopo non c'è più nessun posto dove
+mettere la transazione.
+
+### Tre scelte, e perché
+
+- **Il denaro è `Decimal`/`NUMERIC(14,2)`, mai `float`.** In JSON gli importi sono **stringhe**
+  (`"1351.75"`), perché un numero JSON non ha decimali: rileggendo `97.50` come `float` e
+  riscrivendolo si arriva a `97.49999999999999`. La stringa toglie il passaggio, non lo nasconde. Il
+  test `test_il_totale_torna_al_centesimo` mette sette commissioni da `0.10` e controlla che tornino
+  `-0.70` esatto e che il tipo sia `Decimal`: in `float` farebbero `-0.7000000000000001`.
+- **`accounts.balance` è denormalizzato, e i movimenti sono la verità.** Il saldo è la domanda che lo
+  sportello fa a ogni istante e non può aspettare una `SUM` su tre mesi di righe. Il prezzo è che la
+  copia può divergere, e si paga con una sola regola: **ogni conto apre a `0.00` e ogni variazione passa
+  da `MovementService.record`**, che scrive entrambe le cose in un `commit` solo. Da lì l'invariante
+  `balance == SUM(movements.amount)`, che `MovementService.reconcile` verifica con una query e non con
+  la fiducia.
+- **Il `commit` sta nei servizi, mai nei repository.** I repository fanno `flush` e `refresh` e non
+  sanno cosa sia una transazione. Non è una questione di stile: con il `commit` dentro
+  `ChatRepository.add_message`, la domanda dell'utente entrava al primo salvataggio e la risposta
+  poteva non arrivare mai, lasciando in database una domanda senza risposta. Il rollback non aveva più
+  niente da disfare, perché la prima scrittura era già uscita dalla transazione. Il test
+  `test_un_turno_di_chat_rotto_non_lascia_la_domanda_nel_database` fa fallire il provider a metà turno
+  e controlla che non resti niente.
+
+L'estensione dichiarata del giorno è che una transazione attraversa due repository: il saldo e il
+movimento si scrivono insieme o non si scrivono. Il test che lo dimostra fa rifiutare il movimento a
+Postgres dal `CHECK` `ck_movements_amount_not_zero` **dopo** che l'`UPDATE` del saldo è già partito, e
+poi rilegge da un'altra connessione: leggere dalla stessa sessione non proverebbe niente, perché
+vedrebbe comunque il valore vecchio ancora in memoria.
+
+## Verifiche del gate G3 v3
+
+```bash
+uv run python scripts/day3_smoke.py
+```
+
+| # | Criterio | Esito |
+| --- | --- | --- |
+| 1 | I conti esistono e il saldo è una stringa decimale | OK, `["1351.75", "4216.31", "2234.41"]` |
+| 2 | Movimenti e intestatario vengono dallo stesso JOIN | OK, `count=10` e 10 righe, `holder` nella stessa risposta |
+| 3 | Ogni movimento porta il conto giusto e due decimali | OK |
+| 4 | Il riepilogo per mese raggruppa davvero | OK, 3 righe su 10 movimenti, somma dei mesi = `total_out` |
+| 5 | Netto, entrate e uscite sono coerenti fra loro | OK, `1351.75 = 2500.00 - 1148.25` |
+| 6 | Registrare un movimento risponde 201 col saldo nuovo | OK, `balance="1349.25"`, 10 → 11 righe |
+| 7 | Un movimento da `0.00` è un 422 e non scrive niente | OK, 11 → 11 righe |
+| 8 | Un turno di chat scrive la sessione e risponde | OK |
+| 9 | **Un processo nuovo** ritrova chat e saldo | OK, ruoli `["user", "assistant"]`, saldo `1349.25` da entrambe le parti |
+
+L'ultima verifica è l'unica che gli altri test non possono fare bene da soli. Le prime otto girano
+dentro un server avviato dallo script; la nona gira in un **processo Python separato**, lanciato come
+subprocess dopo che il primo è stato chiuso: un Python nuovo, un engine nuovo, nessuna memoria
+condivisa. Se la chat e il saldo ci sono anche lì, è PostgreSQL a ricordarli, non il processo.
+
+Unico trucco dichiarato: per non chiamare un'API a pagamento, il provider LLM viene sostituito con uno
+stub locale via `app.dependency_overrides`. HTTP vero, sessione vera, transazione vera; lo stub cambia
+chi risponde, non cosa viene scritto.
+
+La review e il rilievo che decido di non correggere sono in `docs/ai-review/G3.md`.
+
 
 ## Tecnologie usate
 
@@ -375,6 +465,10 @@ La review completa, un rilievo per riga e il punto che decido di non correggere,
   Gate G2 v3 verificato: contratti Pydantic v2, `response_model`, errori centralizzati, import CSV,
   request id e CORS da configurazione.
 - **Milestone 3 - Qualità (COMPLETATA)**: test suite, eval, CI, review.
+- **Giornata 3 - Conti e movimenti (COMPLETATA)**: `accounts` e `movements` su PostgreSQL, JOIN e
+  aggregazioni, saldo denormalizzato con riconciliazione, e il `commit` spostato dai repository ai
+  servizi. Gate G3 v3 verificato con `scripts/day3_smoke.py`, compresa la verifica dopo il riavvio in
+  un processo separato.
 - **Milestone 4 - Hardening**: auth JWT reale, rate limit, osservabilità, budget enforcement.
 - **Milestone 5 - Produzione**: deploy, monitoraggio, documentazione operativa.
 
