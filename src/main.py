@@ -15,6 +15,35 @@ from src.config import Environment, Settings, secret_is_configured, settings
 from src.db.session import engine
 from src.exceptions import AppError
 from src.middleware import setup_middleware
+from src.types.error import ErrorDetail, ErrorResponse
+from src.validation import echo_value, field_path, hint_for, terminal_field
+
+
+def _dump(body: ErrorResponse) -> dict[str, object]:
+    return body.model_dump(mode="json")
+
+
+def details_from_request_error(exc: RequestValidationError) -> list[ErrorDetail]:
+    """Il 422 di FastAPI tradotto con lo stesso vocabolario del 422 di una riga CSV.
+
+    `exc.errors()` e' il dizionario grezzo di Pydantic: nome del tipo dell'errore,
+    percorso del campo, valore ricevuto. Qui diventa un `ErrorDetail`, cosi' il
+    chiamante legge `amount` / `NOT_POSITIVE` sia che l'abbia scritto a mano sia che
+    l'abbia scritto in una riga del CSV.
+    """
+    details: list[ErrorDetail] = []
+    for error in exc.errors():
+        hint = hint_for(str(error["type"]), terminal_field(error["loc"]))
+        details.append(
+            ErrorDetail(
+                field=field_path(error["loc"]),
+                code=hint.code,
+                message=hint.message,
+                expected=hint.expected,
+                received=echo_value(error.get("input")),
+            )
+        )
+    return details
 
 
 @asynccontextmanager
@@ -35,48 +64,53 @@ setup_middleware(app)
 
 @app.exception_handler(AppError)
 async def app_exception_handler(req: Request, exc: AppError) -> JSONResponse:
-    content: dict[str, object] = {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "status": exc.status_code,
-        "error": exc.code,
-        "message": exc.message,
-        "path": req.url.path,
-    }
+    details = exc.details
+    if not details and exc.retry_after is not None:
+        details = [ErrorDetail(field="retry_after", code="RATE_LIMIT", message=exc.message)]
+    body = ErrorResponse(
+        timestamp=datetime.now(UTC),
+        status=exc.status_code,
+        error=exc.code,
+        message=exc.message,
+        path=req.url.path,
+        details=details,
+    )
     headers: dict[str, str] = {}
     if exc.retry_after is not None:
-        content["retry_after"] = exc.retry_after
         headers["Retry-After"] = str(exc.retry_after)
-    return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
+    return JSONResponse(status_code=exc.status_code, content=_dump(body), headers=headers)
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(req: Request, exc: Exception) -> JSONResponse:
     # logger.exception(exc) in G7
-    return JSONResponse(
-        status_code=500,
-        content={
-            "timestamp": datetime.now(UTC).isoformat(),
-            "status": 500,
-            "error": "INTERNAL_ERROR",
-            "message": "Errore inatteso",
-            "path": req.url.path,
-        },
+    body = ErrorResponse(
+        timestamp=datetime.now(UTC),
+        status=500,
+        error="INTERNAL_ERROR",
+        message="Errore inatteso",
+        path=req.url.path,
     )
+    return JSONResponse(status_code=500, content=_dump(body))
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(req: Request, exc: RequestValidationError) -> JSONResponse:
-    return JSONResponse(
-        status_code=422,  # default FastAPI
-        content={
-            "timestamp": datetime.now(UTC).isoformat(),
-            "status": 422,
-            "error": "VALIDATION_ERROR",
-            "message": "Input non valido",
-            "path": req.url.path,
-            "details": [f"{e['loc'][-1]}: {e['msg']}" for e in exc.errors()],
-        },
+    """Il 422 di FastAPI entra nella stessa busta di ogni altro errore.
+
+    Non e' un caso diverso dal 500 o dal 400 di dominio: e' lo stesso problema
+    ('questa richiesta non e' valida') con un'altra causa. Il chiamante vede
+    `ErrorResponse` e i suoi `details`, identici a quelli di un errore di dominio.
+    """
+    body = ErrorResponse(
+        timestamp=datetime.now(UTC),
+        status=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        error="VALIDATION_ERROR",
+        message="Richiesta non valida",
+        path=req.url.path,
+        details=details_from_request_error(exc),
     )
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content=_dump(body))
 
 
 class CredentialsHealth(BaseModel):

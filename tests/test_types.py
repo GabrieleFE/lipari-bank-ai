@@ -120,15 +120,18 @@ def test_categorize_response_invalid_category_rejected() -> None:
         pass
 
 
-def test_error_response_optional_details() -> None:
+def test_error_response_details_default_to_an_empty_list() -> None:
+    """`details` e' sempre una lista, mai `null`: il chiamante non deve distinguere
+    'nessun problema' da 'dettaglio assente', perche' non e' una differenza."""
     err = ErrorResponse(
         timestamp=datetime(2024, 1, 1, tzinfo=UTC),
         status=422,
         error="VALIDATION_ERROR",
-        message="Input non valido",
+        message="Richiesta non valida",
         path="/x",
     )
-    assert err.details is None
+    assert err.details == []
+    assert err.model_dump(mode="json")["details"] == []
 
 
 def test_advice_request_short_question_rejected() -> None:

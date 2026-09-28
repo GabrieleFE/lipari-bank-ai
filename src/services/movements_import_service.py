@@ -4,44 +4,29 @@ import io
 from pydantic import ValidationError
 
 from src.exceptions import ImportFileError
+from src.types.error import ErrorDetail
 from src.types.movements import ImportProblem, MovementImportResponse, MovementRow
+from src.validation import describe_detail
+from src.validation_bridge import details_from_validation_error
 
 REQUIRED_COLUMNS = ("date", "description", "amount", "currency")
 MAX_IMPORT_BYTES = 5_000_000
-_MAX_ECHOED_VALUE = 50
-
-_FIELD_HINTS: dict[str, str] = {
-    "greater_than": "deve essere maggiore di zero",
-    "string_too_short": "non può essere vuota",
-    "string_too_long": "è troppo lunga (massimo 200 caratteri)",
-    "string_pattern_mismatch": "deve essere un codice valuta di tre lettere maiuscole",
-    "float_parsing": "deve essere un numero",
-    "int_parsing": "deve essere un numero",
-    "float_type": "deve essere un numero",
-    "date_parsing": "non è una data valida in formato AAAA-MM-GG",
-    "date_from_datetime_parsing": "non è una data valida in formato AAAA-MM-GG",
-    "date_type": "non è una data valida in formato AAAA-MM-GG",
-    "missing": "manca",
-    "extra": "non è previsto dal contratto della riga",
-}
+UNKNOWN_CODE = "INVALID_VALUE"
 
 
-def _echoed(value: object, limit: int = _MAX_ECHOED_VALUE) -> str:
-    if value is None:
-        return "assente"
-    text = " ".join(str(value).split())
-    if not text:
-        return "vuoto"
-    if len(text) > limit:
-        return f"{text[:limit]}..."
-    return text
+def _problem(row: int, detail: ErrorDetail) -> ImportProblem:
+    return ImportProblem(row=row, reason=describe_detail(detail.model_dump()), detail=detail)
 
 
 class MovementsImportService:
     """Valida un estratto conto riga per riga: nessuna riga sparisce, nessuna passa per buona.
 
     Non scrive nulla: il contratto dell'esercizio è il conteggio esatto e il resoconto
-    delle righe rifiutate. La persistenza arriva con i repository.
+    delle righe rifiutate. La persistenza arriva con i repository, e per allora
+    l'idempotenza (stesso file due volte) sara' un problema suo, non di questo metodo.
+
+    La regola di validazione non e' qui dentro: sta in `MovementRow`. Questo servizio
+    si limita a tradurre l'eccezione del modello nel formato che lo sportello legge.
     """
 
     def import_csv(self, raw: bytes) -> MovementImportResponse:
@@ -63,7 +48,11 @@ class MovementsImportService:
                 imported += 1
             else:
                 problems.append(problem)
-        return MovementImportResponse(imported_count=imported, problems=problems)
+        return MovementImportResponse(
+            imported_count=imported,
+            total_rows=len(data_rows),
+            problems=problems,
+        )
 
     def _decode(self, raw: bytes) -> str:
         if not raw.strip():
@@ -110,26 +99,34 @@ class MovementsImportService:
         self, line_number: int, header: list[str], cells: list[str]
     ) -> ImportProblem | None:
         if len(cells) != len(header):
-            return ImportProblem(
-                row=line_number,
-                field=None,
-                reason=(f"riga: ha {len(cells)} colonne, l'intestazione ne dichiara {len(header)}"),
+            # Riga strutturalmente sbagliata: nessun campo del contratto c'e' da indicare,
+            # quindi `field` resta a `row` e il codice dice 'quante colonne mancano/avanzano'.
+            return _problem(
+                line_number,
+                ErrorDetail(
+                    field="row",
+                    code="COLUMN_COUNT_MISMATCH",
+                    message=(f"ha {len(cells)} colonne, l'intestazione ne dichiara {len(header)}"),
+                    expected=f"{len(header)} colonne",
+                    received=str(len(cells)),
+                ),
             )
         mapping = {name.strip().lower(): value for name, value in zip(header, cells, strict=True)}
         try:
             MovementRow.model_validate(mapping)
         except ValidationError as exc:
-            field, reason = self._describe(exc)
-            return ImportProblem(row=line_number, field=field, reason=reason)
+            return _problem(line_number, self._worst_detail(exc))
         return None
 
-    def _describe(self, error: ValidationError) -> tuple[str | None, str]:
-        first_field: str | None = None
-        parts: list[str] = []
-        for item in error.errors(include_url=False):
-            field = ".".join(str(part) for part in item["loc"])
-            if first_field is None:
-                first_field = field
-            hint = _FIELD_HINTS.get(str(item["type"]), "non rispetta il formato atteso")
-            parts.append(f"{field}: {hint} (valore ricevuto: {_echoed(item['input'])})")
-        return first_field, "; ".join(parts)
+    def _worst_detail(self, exc: ValidationError) -> ErrorDetail:
+        """Il problema più utile, non il primo.
+
+        Pydantic restituisce gli errori nell'ordine dei campi del modello: se una riga
+        ha una data inesistente e un importo a zero, riportare solo `date` lascia lo
+        sportello a scoprire il resto al giro dopo. Si sceglie il primo errore che ha
+        una spiegazione dedicata nel vocabolario, cosi' la riga viene sistemata una volta.
+        """
+        details = details_from_validation_error(exc)
+        if not details:
+            return ErrorDetail(field="row", code=UNKNOWN_CODE, message="riga non valida")
+        return next((d for d in details if d.code != UNKNOWN_CODE), details[0])

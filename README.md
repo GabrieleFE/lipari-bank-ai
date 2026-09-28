@@ -100,11 +100,28 @@ Esempio di risposta quando le chiavi dei modelli non sono configurate:
 `503` con `status: DEGRADED` se ne manca qualcuna. La risposta dice sempre in quale ambiente sta
 girando l'app e quali credenziali mancano, ma **mai** i loro valori.
 
-## Import movimenti da CSV (Giorno 2)
+## La giornata 2 in un comando
+
+```bash
+uv run python scripts/day2_smoke.py
+```
+
+Lo script avvia l'app su una porta libera, esegue le verifiche via HTTP e stampa per ognuna cosa ha
+chiesto, cosa si aspettava e cosa ha ottenuto. Non serve alcuna chiave API e non serve PostgreSQL: al
+termine lascia la porta indicata, se vuoi aprire la console e rifare le prove a mano. Se una verifica
+non è conforme lo script esce con codice 1 e dice quale.
+
+Le verifiche coprono le nove della consegna: la bolletta riconosciuta con la confidenza dichiarata, la
+causale sconosciuta che torna `OTHER` invece di silenzio, la valuta scritta male che viene respinta
+nominando il campo, il CSV da 200 righe con il conto esatto, le sette righe scartate ognuna con il suo
+numero e un codice diverso, la busta unica su tre origini d'errore diverse, l'assenza di traceback e
+percorsi nelle risposte, il rilancio che non raddoppia, e l'apertura della console.
+
+## Import movimenti da CSV
 
 `POST /api/ai/movements/import` accetta un file CSV con intestazione esatta
-`date,description,amount,currency` e risponde con quante righe sono state importate e l'elenco delle
-righe scartate, ognuna con il proprio numero e il motivo.
+`date,description,amount,currency` e risponde con quante righe sono state importate, quante righe
+aveva il file e l'elenco delle scartate, ognuna con il proprio numero di riga e il motivo.
 
 ```bash
 curl.exe -X POST http://localhost:8000/api/ai/movements/import -F "file=@data/movements_sample.csv"
@@ -113,27 +130,103 @@ curl.exe -X POST http://localhost:8000/api/ai/movements/import -F "file=@data/mo
 ```json
 {
   "imported_count": 18,
+  "total_rows": 25,
+  "replayed": false,
   "problems": [
-    { "row": 8, "field": "amount", "reason": "amount: deve essere maggiore di zero (valore ricevuto: -180.00)" },
-    { "row": 13, "field": null, "reason": "riga: ha 3 colonne, l'intestazione ne dichiara 4" }
+    {
+      "row": 8,
+      "reason": "amount: deve essere maggiore di zero (valore ricevuto: -180.00)",
+      "detail": {
+        "field": "amount",
+        "code": "NOT_POSITIVE",
+        "message": "deve essere maggiore di zero",
+        "expected": "> 0",
+        "received": "-180.00"
+      }
+    }
   ]
 }
 ```
 
-Un file che non è un CSV (intestazione diversa), un file vuoto o un file che il server non riesce a
-leggere non producono mai un `500`: sono errori di dominio e tornano nella busta unica
-`ErrorResponse` (`timestamp`, `status`, `error`, `message`, `path`, `details`) con i codici
-`INVALID_CSV_HEADER`, `EMPTY_IMPORT_FILE` e `IMPORT_FILE_NOT_CSV`. Un file oltre 5 MB viene rifiutato
-con `413 IMPORT_FILE_TOO_LARGE`. La console web ha la card "Import movimenti" per fare la stessa
-richiesta dal browser.
+`row` è il numero di riga **nel file**, con l'intestazione che occupa la riga 1: la dodicesima riga di
+dati è la tredicesima del file. È il numero che lo sportello cerca aprendo l'estratto.
 
-#### Scelta: import parziale con elenco dei problemi
+#### Scelta: import parziale, 193 su 200
 
-L'endpoint non è "tutto o niente": conta come importate le righe valide e restituisce le scartate con
-numero di riga, campo e motivo in italiano leggibile. Così l'utente sistema i dati reali del file
-invece di risolvere un errore alla volta; la risposta resta comunque un `200` perché il file *è* stato
-elaborato, e ogni riga è o importata o motivata, mai ignorata in silenzio. L'import è stateless: non
-scrive sul database, quindi rieseguire lo stesso file non duplica nulla.
+Un file da 200 righe di cui 7 non conformi viene risposto con `total_rows: 200`, `imported_count: 193` e
+7 problemi. Le tre righe della decisione:
+
+- **`imported_count + len(problems) == total_rows`**, sempre. È la proprietà che rende il conto
+  verificabile a occhio: se tornassero meno numeri di quanti ce n'erano, il chiamante saprebbe che
+  qualcosa è sparito, e potrebbe chiedere. Senza `total_rows` questa somma non si potrebbe nemmeno
+  scrivere.
+- **200 è la soglia che rende visibile l'errore**: sotto, 6 scarti su 20 si confondono con il rumore
+  del file; sopra, la verifica costa tempo senza aggiungere informazione. La proprietà è aritmetica,
+  quindi il test la dimostra a 200 righe generando il file, non a 25 righe di esempio che dimostrerebbero
+  solo che quell'esempio è giusto.
+- **200 righe non le tratto come tutte uguali**: 193 importate e 7 scartate, con sette cause diverse
+  (`NOT_POSITIVE` due volte, `EMPTY`, `NOT_A_DATE`, `NOT_A_CURRENCY`, `NOT_A_NUMBER`,
+  `COLUMN_COUNT_MISMATCH`). Se la validazione dicesse sempre "riga non valida", il conteggio tornerebbe
+  uguale e il conto sarebbe comunque falso: quello che serve sapere è *quale* problema blocca *quale*
+  riga.
+
+Una riga con più problemi resta **una** voce in `problems`, non una per errore: la riga è una, e lo
+sportello la sistema una volta. Il `detail` indica il primo problema da cui cominciare, e a quel punto
+la stessa riga torna con il successivo. Un file che non è un CSV, un file vuoto o un file illeggibile
+non producono mai un `500`: sono errori di dominio e tornano nella busta unica `ErrorResponse`
+(`timestamp`, `status`, `error`, `message`, `path`, `details`) con i codici `INVALID_CSV_HEADER`,
+`EMPTY_IMPORT_FILE` e `IMPORT_FILE_NOT_CSV`. Un file oltre 5 MB viene rifiutato con
+`413 IMPORT_FILE_TOO_LARGE` durante la lettura, non dopo.
+
+#### Estensione dichiarata: `Idempotency-Key` sul rilancio
+
+L'import è stateless e non scrive sul database, quindi il pericolo del giorno 2 non è la duplicazione
+in tabella: è che lo sportello, non vedendo un effetto, prema "Importa" e non sappia se la prima
+volta è andata. Inviare l'intestazione `Idempotency-Key` dichiara l'intenzione:
+
+- stesso file e stessa chiave → la stessa risposta con `replayed: true`, senza raddoppiare nulla;
+- file diverso e stessa chiave → `409 IDEMPOTENCY_KEY_CONFLICT`, perché restituire il conto di un file
+  diverso sarebbe peggio che fallire: lo sportello vedrebbe un totale che non è il suo.
+
+Il registro tiene l'hash SHA-256 del contenuto e vive **nella memoria del processo**: si perde al
+riavvio e non è condiviso tra più worker. È la forma giusta per una promessa dichiarata dal
+chiamante su un endpoint che non scrive, non per un endpoint che scrive: quando l'import scriverà in
+tabella, la chiave dovrà diventare una colonna con vincolo di unicità. Il punto è riportato anche in
+`docs/ai-review/G2.md` (rilievo 12 e 16).
+
+La prova dell'estensione è
+`tests/test_import_idempotency.py::test_ricaricare_lo_stesso_file_con_la_stessa_chiave_non_raddoppia_il_conto`.
+
+## Una busta d'errore sola
+
+Ogni errore dell'API, di qualunque origine, esce nella stessa busta:
+
+```json
+{
+  "timestamp": "2026-09-28T10:34:54.066513Z",
+  "status": 422,
+  "error": "VALIDATION_ERROR",
+  "message": "Richiesta non valida",
+  "path": "/api/ai/categorize",
+  "details": [
+    {
+      "field": "amount",
+      "code": "NOT_POSITIVE",
+      "message": "deve essere maggiore di zero",
+      "expected": "> 0",
+      "received": "-10"
+    }
+  ]
+}
+```
+
+Questo include il `422` che FastAPI genera da solo, senza che nessuno lo chieda: ha un handler
+esplicito in `src/main.py` che usa lo stesso vocabolario di `pydantic.ValidationError`. `field` e `code`
+sono la parte che un programma usa, `message` è per chi legge: se il codice non ci fosse, l'unico modo
+di distinguere un importo a zero da una valuta sbagliata sarebbe leggere la frase e riconoscerla a
+orecchio, e i problemi del sistema non potrebbero essere contati da un programma.
+
+Le risposte d'errore non contengono mai un traceback, un percorso del computer o un nome di modulo.
 
 ## Tracciabilità delle richieste
 
@@ -234,25 +327,36 @@ L'elenco completo e commentato è in `.env.example` (una riga di commento per va
 
 ## Verifiche del gate G2 v3
 
-Tutte eseguite in locale con l'app avviata e `.venv` ricostruita da `uv sync --locked`.
+Le nove verifiche della consegna si eseguono con un comando solo:
+`uv run python scripts/day2_smoke.py`. Lo script avvia l'app su una porta libera e interroga l'API via
+HTTP, non tramite oggetti Python in-process: quello che stampa è ciò che vede `curl` o il browser.
 
-| # | Criterio | Come l'ho verificato | Esito |
-| --- | --- | --- | --- |
-| 1 | Esistono i 3 modelli in `src/types/movements.py` | lettura del file | OK |
-| 2 | La logica sta in `services/`, non in `api/` | lettura di `src/api/movements.py` | OK |
-| 3 | L'endpoint compare in `/docs` e risponde 200 | `curl.exe -X POST .../import -F "file=@data/movements_sample.csv"` | OK, 18/25 |
-| 4 | `imported_count` conta solo le righe valide | stessa risposta del campione: 25 righe, 18 valide | OK |
-| 5 | Ogni problema ha `row`, `field`, `reason` | ispezione della risposta (7 problemi) | OK |
-| 6 | File non-CSV o vuoto → 400 con codice, non 500 | `curl.exe -F "file=@memo.txt"` e file vuoto | `400 INVALID_CSV_HEADER`, `400 EMPTY_IMPORT_FILE` |
-| 7 | Senza file → 422 che nomina `file` | `curl.exe -X POST .../import` | `422 VALIDATION_ERROR`, `details: ["file: Field required"]` |
-| 8 | Nessun traceback o percorso nelle risposte | lettura delle 4 risposte di errore | OK |
-| 9 | `mypy` pulito | `uv run mypy src tests scripts alembic/env.py` | 58 file, 0 errori |
-| 10 | Il servizio dichiara il suo scope | docstring di `movements_import_service.py` | OK |
-| 11 | `ruff check` pulito | `uv run ruff check .` | OK |
+| # | Criterio | Esito |
+| --- | --- | --- |
+| 1 | Una bolletta viene classificata con la confidenza dichiarata | OK, `UTILITIES` con confidenza 0.90 e le parole trovate in `reasoning` |
+| 2 | Una causale sconosciuta non torna silenzio | OK, `OTHER` con confidenza 0.10 e fallback dichiarato |
+| 3 | Una valuta scritta male viene respinta nominando il campo | OK, `422` con `NOT_A_CURRENCY` su `currency` |
+| 4 | Un CSV da 200 righe ha il conto esatto | OK, `total_rows: 200`, `imported_count: 193`, 7 problemi |
+| 5 | Ogni riga scartata ha il suo numero e un codice | OK, righe `[13, 58, 100, 142, 167, 189, 200]` |
+| 6 | Le sette scarti hanno sette cause diverse | OK, sette codici distinti |
+| 7 | 422 di FastAPI, 400 di dominio e file vuoto: una sola busta | OK, stesse sei chiavi e stessi cinque campi in `details[]` |
+| 8 | Nessuna risposta d'errore contiene traceback o percorsi | OK, quattro errori di origine diversa |
+| 9 | Ricaricare non raddoppia; cambiare file con la stessa chiave è un 409 | OK, `replayed: true` e `409 IDEMPOTENCY_KEY_CONFLICT` |
 
-In più, sempre dal vivo: eco di `X-Request-Id` nella risposta, CORS che risponde all'origine
-configurata e non alle altre, preflight `OPTIONS` con metodi e header espliciti, e 20 test automatici
-(`tests/test_movements_import.py`, `tests/test_health.py`).
+In più: la console si apre e contiene le due card con il campo `Idempotency-Key`.
+
+La prova dell'estensione dichiarata è un solo test:
+
+```bash
+uv run pytest tests/test_import_idempotency.py::test_ricaricare_lo_stesso_file_con_la_stessa_chiave_non_raddoppia_il_conto
+```
+
+Dimostra che ricaricare lo stesso file con la stessa chiave restituisce lo stesso conto e si dichiara
+come rilancio (`replayed: true`). Gli altri test coprono il contratto di base della giornata.
+
+La review completa, un rilievo per riga e il punto che decido di non correggere, è in
+`docs/ai-review/G2.md`.
+
 
 ## Tecnologie usate
 

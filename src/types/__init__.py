@@ -5,21 +5,32 @@ from src.types.advice import (
     IngestRequest,
     IngestResponse,
 )
-from src.types.categorize import CategorizeRequest, CategorizeResponse, CategoryEnum
+from src.types.categorize import (
+    CATEGORIES,
+    CategorizeRequest,
+    CategorizeResponse,
+    CategoryEnum,
+)
 from src.types.chat import ChatRequest, ChatResponse, ToolCallInfo
-from src.types.error import ErrorResponse
+from src.types.error import ErrorDetail, ErrorResponse
+from src.types.movements import ImportProblem, MovementImportResponse, MovementRow
 
 __all__ = [
+    "CATEGORIES",
     "AdviceRequest",
     "AdviceResponse",
-    "CategoryEnum",
     "CategorizeRequest",
     "CategorizeResponse",
+    "CategoryEnum",
     "ChatRequest",
     "ChatResponse",
     "Citation",
+    "ErrorDetail",
     "ErrorResponse",
+    "ImportProblem",
     "IngestRequest",
     "IngestResponse",
+    "MovementImportResponse",
+    "MovementRow",
     "ToolCallInfo",
 ]

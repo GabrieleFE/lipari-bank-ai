@@ -165,7 +165,16 @@
     <p class="hint">CSV con intestazione <code>date,description,amount,currency</code>. Le righe non valide
       tornano con il loro numero e il motivo: nessuna riga sparisce, nessuna passa per buona.</p>
     <div><label>File CSV</label><input id="imp_file" type="file" accept=".csv,text/csv"></div>
+    <button class="examples" onclick="generaCsvDiProva()" style="align-self:flex-start; padding:6px 12px; font-size:12px;">Genera il CSV di 200 righe</button>
+    <div>
+      <label>Idempotency-Key (facoltativa)</label>
+      <input id="imp_key" placeholder="es. bonifico-gennaio-2025-01">
+    </div>
+    <p class="hint">Ricaricando lo stesso file con la stessa chiave non si raddoppia niente:
+      torna la stessa risposta con <code>replayed: true</code>. Cambia il file e tieni la chiave,
+      e il server risponde 409 invece di importare.</p>
     <button class="primary" id="imp_btn" onclick="runImport()">Importa</button>
+    <button class="examples" id="imp_again" onclick="runImport()" style="align-self:flex-start; padding:6px 12px; font-size:12px;">Ricarica e invia di nuovo</button>
     <div class="result" id="imp_result" hidden></div>
   </section>
 
@@ -429,14 +438,42 @@ Recesso senza penali in qualsiasi momento; chiusura entro 30 giorni dalla richie
     } finally { setBtn('ing_btn', false); }
   }
 
+  // Genera lo stesso file che il test usa: 200 righe, 7 sporche, 193 buone.
+  // Serve a verificare il conto dal browser senza dover preparare un file a mano.
+  function generaCsvDiProva() {
+    const righe = 200;
+    const sporche = {
+      12: ['2025-01-06', 'Bonifico', '-40.00', 'EUR'],
+      57: ['2025-01-06', 'Bonifico', '0.00', 'EUR'],
+      99: ['2025-01-06', '', '10.00', 'EUR'],
+      141: ['2025-02-30', 'Bonifico', '10.00', 'EUR'],
+      166: ['2025-01-06', 'Bonifico', '10.00', 'eur'],
+      188: ['2025-01-06', 'Bonifico', 'N/D', 'EUR'],
+      199: ['2025-01-06', 'Bonifico', '10.00', 'EUR', 'EUR'],
+    };
+    const out = ['date,description,amount,currency'];
+    for (let i = 1; i <= righe; i++) {
+      out.push((sporche[i] || ['2025-01-06', 'Bonifico ' + i, '10.50', 'EUR']).join(','));
+    }
+    const blob = new Blob([out.join('\n') + '\n'], { type: 'text/csv' });
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'duecento-righe.csv', { type: 'text/csv' }));
+    const input = document.getElementById('imp_file');
+    input.files = dt.files;
+    fill('imp_key', 'prova-200-righe');
+  }
+
   async function runImport() {
     const input = document.getElementById('imp_file');
     if (!input.files.length) return alert('Scegli un file CSV');
     const form = new FormData();
     form.append('file', input.files[0]);
+    const headers = {};
+    const key = document.getElementById('imp_key').value.trim();
+    if (key) headers['Idempotency-Key'] = key;
     setBtn('imp_btn', true, 'Importo…');
     try {
-      const res = await fetch('/api/ai/movements/import', { method: 'POST', body: form });
+      const res = await fetch('/api/ai/movements/import', { method: 'POST', body: form, headers });
       const text = await res.text();
       let data;
       try { data = JSON.parse(text); } catch { data = { raw: text }; }
@@ -444,20 +481,39 @@ Recesso senza penali in qualsiasi momento; chiusura entro 30 giorni dalla richie
       el.hidden = false;
       el.innerHTML = '';
       if (!res.ok) { renderJson('imp_result', data, res.status); return; }
+      const scartate = data.problems.length;
       const badge = document.createElement('span');
       badge.className = 'badge ok';
-      badge.textContent = `${data.imported_count} importate · ${data.problems.length} scartate`;
+      badge.textContent = `${data.imported_count} importate · ${scartate} scartate di ${data.total_rows}`;
       el.appendChild(badge);
+      // Il conto che l'ufficio controlla: dentro + fuori = righe del file.
+      const conto = document.createElement('div');
+      conto.className = 'meta';
+      conto.textContent = `${data.imported_count} + ${scartate} = ${data.imported_count + scartate} · il file ha ${data.total_rows} righe`;
+      el.appendChild(conto);
+      if (data.replayed) {
+        const replay = document.createElement('div');
+        replay.className = 'meta';
+        replay.textContent = 'Rilancio: stessa chiave e stesso file, nessuna riga è stata importata due volte.';
+        el.appendChild(replay);
+      }
       for (const p of data.problems) {
         const div = document.createElement('div');
         div.className = 'cite';
         const head = document.createElement('div');
         head.className = 'src';
-        head.textContent = `riga ${p.row}` + (p.field ? ` · campo ${p.field}` : '');
+        const d = p.detail || {};
+        head.textContent = `riga ${p.row} · campo ${d.field || '?'} · ${d.code || '?'}`;
         div.appendChild(head);
         const body = document.createElement('div');
         body.textContent = p.reason;
         div.appendChild(body);
+        if (d.expected || d.received) {
+          const tail = document.createElement('div');
+          tail.className = 'meta';
+          tail.textContent = `atteso: ${d.expected || '—'} · ricevuto: ${d.received || '—'}`;
+          div.appendChild(tail);
+        }
         el.appendChild(div);
       }
       el.style.borderColor = 'var(--green)';

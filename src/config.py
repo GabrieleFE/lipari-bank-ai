@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     default_model: str = Field(default="gpt-4o-mini", min_length=1)
     categorize_model: str = Field(default="gpt-4o-mini", min_length=1)
+    # Chi decide la categoria: `rules` (parole chiave, senza rete) o `llm` (Instructor).
+    # Il contratto di risposta e' lo stesso nei due casi: cambia chi lo implementa.
+    categorize_provider: Literal["rules", "llm"] = "rules"
     judge_model: str = Field(default="gpt-4o", min_length=1)
     embedding_model: str = Field(
         default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",

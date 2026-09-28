@@ -73,27 +73,24 @@ class FakeEmbeddingClient:
 
 
 class FakeCategorizeService:
-    """Categorizer deterministico basato su keyword: preserva le asserzioni dei test."""
+    """Categorizer deterministico, senza rete.
+
+    Non serve piu' agli endpoint: `/api/ai/categorize` usa gia' la regola a parole
+    chiave di `KeywordCategorizeService`, che e' deterministica e gratuita. Resta
+    qui per i test che vogliono pilotare le risposte del provider LLM senza chiamarlo.
+    """
+
+    def __init__(self, response: CategorizeResponse | None = None) -> None:
+        self._response = response
+        self.requests: list[CategorizeRequest] = []
 
     async def categorize(self, req: CategorizeRequest) -> CategorizeResponse:
-        desc = req.description.lower()
-        if any(k in desc for k in ("enel", "bolletta", "luce", "gas")):
-            return CategorizeResponse(
-                category="UTILITIES",
-                subcategory="ENERGY",
-                confidence=0.92,
-                reasoning="Description contains utility keywords",
-            )
-        if any(k in desc for k in ("supermercato", "esselunga", "coop")):
-            return CategorizeResponse(
-                category="GROCERIES",
-                subcategory="SUPERMARKET",
-                confidence=0.85,
-                reasoning="Description matches grocery store",
-            )
+        self.requests.append(req)
+        if self._response is not None:
+            return self._response
         return CategorizeResponse(
             category="OTHER",
-            subcategory="UNCATEGORIZED",
-            confidence=0.10,
-            reasoning="No matching pattern",
+            subcategory="NON_CLASSIFICATO",
+            confidence=0.1,
+            reasoning="Fake: nessuna regola applicata.",
         )

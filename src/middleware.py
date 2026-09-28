@@ -23,6 +23,9 @@ def setup_middleware(app: FastAPI) -> None:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+        # `Idempotency-Key` serve al rilancio dell'import. Senza questa voce la pagina
+        # su un'altra origine verrebbe bloccata dal preflight: l'intestazione che
+        # l'ufficio usa per non raddoppiare le righe non arriverebbe mai al server.
+        allow_headers=["Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key"],
         allow_credentials=True,
     )

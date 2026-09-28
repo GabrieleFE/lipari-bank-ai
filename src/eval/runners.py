@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from src.api.categorize import get_categorize_service
+from src.api.categorize import build_categorizer
 from src.config import settings
 from src.db.session import async_session_factory
 from src.llm.client import LLMProvider, Message
@@ -49,12 +49,16 @@ async def eval_categorize(dataset_path: Path, model: str | None = None) -> dict[
     Il confronto e' esatto (un valore di un elenco chiuso), quindi la metrica e'
     l'accuracy aggregata + i failures.
 
+    Misura sempre il provider `llm` esplicitamente, anche se il default dell'app e'
+    la regola a parole chiave: qui la domanda e' quanto e' bravo il modello, e
+    confrontarlo con le regole sarebbe un'altra domanda (e un altro esperimento).
+
     Nota sul costo: CategorizeService non espone token/usage (ritorna solo
     CategorizeResponse), quindi qui il costo NON viene tracciato — meglio un dato
     mancante dichiarato che un numero inventato.
     """
     examples = await asyncio.to_thread(_load_jsonl, dataset_path)
-    service = get_categorize_service(model=model)
+    service = build_categorizer(provider="llm", model=model)
 
     total_latency = 0.0
     correct = 0
